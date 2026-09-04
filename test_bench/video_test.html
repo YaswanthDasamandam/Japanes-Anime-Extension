@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real Video Player - Chrome Extension Test Page</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #0b0f19;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 30px 20px;
+    }
+    header {
+      max-width: 854px;
+      width: 100%;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    h1 {
+      font-size: 1.6rem;
+      margin-bottom: 8px;
+    }
+    p {
+      color: #94a3b8;
+      font-size: 0.95rem;
+    }
+    .video-wrapper {
+      position: relative;
+      max-width: 854px;
+      width: 100%;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+      border: 1px solid #1e293b;
+    }
+    video {
+      width: 100%;
+      display: block;
+    }
+    .instructions {
+      max-width: 854px;
+      width: 100%;
+      margin-top: 24px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 18px 24px;
+    }
+    .instructions h3 {
+      font-size: 1rem;
+      margin-bottom: 8px;
+      color: #38bdf8;
+    }
+    .instructions ol {
+      padding-left: 20px;
+      line-height: 1.7;
+      font-size: 0.9rem;
+      color: #cbd5e1;
+    }
+    kbd {
+      background: #0f172a;
+      border: 1px solid #475569;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎌 Chrome Extension Video Player Test</h1>
+    <p>This page runs a real HTML5 &lt;video&gt; player with native Japanese subtitles (.vtt) for testing the extension.</p>
+  </header>
+
+  <div class="video-wrapper">
+    <video id="testVideo" controls autoplay crossorigin="anonymous">
+      <source src="sample_video.mp4" type="video/mp4">
+      <track default kind="subtitles" srclang="ja" label="Japanese" src="sample_1.vtt">
+    </video>
+  </div>
+
+  <div class="instructions">
+    <h3>🧪 How to verify the Extension here:</h3>
+    <ol>
+      <li>Load the unpacked extension in Chrome via <code>chrome://extensions</code> (Folder: <code>c:\Users\dysai\MyProjects\Japanes Anime Extension\extension</code>).</li>
+      <li>Refresh this page. You will see the extension automatically hook into the &lt;video&gt; player.</li>
+      <li>Play the video: Watch the floating subtitle box light up both Japanese and Rōmaji words in real-time!</li>
+      <li>Press <kbd>M</kbd> to cycle between <b>Dual Mode</b>, <b>Hover-Only Mode</b>, and <b>Furigana Mode</b>.</li>
+      <li>Press <kbd>E</kbd> to toggle the English translation line.</li>
+      <li>Hover over any word to view its English Pronunciation and definition popup.</li>
+      <li>Click and drag the subtitle box to reposition it anywhere on your screen.</li>
+    </ol>
+  </div>
+</body>
+</html>

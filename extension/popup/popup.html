@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anime Subtitles Settings</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <div class="header">
+      <h2>🎌 Anime Rōmaji</h2>
+      <span class="status-badge">Active</span>
+    </div>
+
+    <div class="section">
+      <div class="option-row select-row">
+        <span>Subtitle Mode (<kbd>M</kbd>)</span>
+        <select id="popDisplayMode">
+          <option value="dual">Dual (Japanese + Rōmaji)</option>
+          <option value="hover">Hover (Japanese Only)</option>
+          <option value="ruby">Furigana (Ruby Above)</option>
+        </select>
+      </div>
+      <div class="option-row">
+        <span>Dual English Subtitles (<kbd>E</kbd>)</span>
+        <label class="switch">
+          <input type="checkbox" id="popShowEnglish" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="option-row">
+        <span>Auto-Pause (Shadowing) (<kbd>P</kbd>)</span>
+        <label class="switch">
+          <input type="checkbox" id="popShadowing">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="section shortcuts">
+      <div class="shortcut-title">Hotkeys:</div>
+      <div class="shortcut-item"><kbd>E</kbd> Toggle English Subtitles</div>
+      <div class="shortcut-item"><kbd>R</kbd> Replay Current Line</div>
+      <div class="shortcut-item"><kbd>P</kbd> Toggle Shadowing Mode</div>
+    </div>
+
+    <div class="footer" style="display: flex; flex-direction: column; gap: 8px;">
+      <button id="btnOpenVideoTest" class="test-bench-btn" style="background: #0284c7;">Test on HTML5 Video Player 🎬</button>
+      <button id="btnOpenTestBench" class="test-bench-btn" style="background: #334155;">Open Audio Test Bench 🚀</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

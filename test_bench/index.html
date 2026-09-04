@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Japanese Anime Extension - Interactive Test Bench</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "wanakana": "/node_modules/wanakana/esm/index.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header>
+    <div class="header-container">
+      <h1>🎌 Japanese Anime Subtitle & Rōmaji Test Bench</h1>
+      <span class="badge">100% Local / In-Browser</span>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Controls Bar -->
+    <section class="controls-panel">
+      <div class="control-group">
+        <label for="sampleSelect">Select Real Audio Clip:</label>
+        <select id="sampleSelect">
+          <option value="sample_1">1. Anime Iconic Quote (Fist of the North Star) - "Omae wa mou shinde iru"</option>
+          <option value="sample_2">2. Conversational Dialogue - "Kyou wa samuidesu ka?"</option>
+          <option value="sample_3">3. Dramatic Speech - "Ore tachi wa ima kara shinu ndesu ka?"</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="displayModeSelect">Subtitle Display Mode (<kbd>M</kbd>):</label>
+        <select id="displayModeSelect">
+          <option value="dual">1. Dual Subtitles (Japanese + Always-Visible Rōmaji)</option>
+          <option value="hover">2. Japanese Only (Hover for English Pronunciation & Meaning)</option>
+          <option value="ruby">3. Furigana Style (Pronunciation directly above Kanji)</option>
+        </select>
+      </div>
+
+      <div class="toggle-group">
+        <label class="switch-label">
+          <input type="checkbox" id="toggleEnglish" checked>
+          <span>English Translation (<kbd>E</kbd>)</span>
+        </label>
+        <label class="switch-label">
+          <input type="checkbox" id="toggleShadowing">
+          <span>Auto-Pause (<kbd>P</kbd>)</span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Simulated Video / Audio Player -->
+    <section class="player-container">
+      <div class="video-screen">
+        <div class="anime-backdrop">
+          <div class="scene-title" id="sceneTitle">Fist of the North Star - Iconic Scene</div>
+          <div class="timestamp-display" id="timeDisplay">0.00s / 12.68s</div>
+        </div>
+
+        <!-- Karaoke Subtitle Overlay (Exact same overlay that injects into YouTube/Anime players) -->
+        <div class="sub-overlay-container" id="subOverlay">
+          <!-- Kanji / Kana Line (Optional) -->
+          <div class="sub-line sub-kanji" id="kanjiLine">お前はもう死んでいる</div>
+
+          <!-- Rōmaji Karaoke Line -->
+          <div class="sub-line sub-romaji" id="romajiLine">
+            <!-- Words injected dynamically with hover dictionary & karaoke highlights -->
+          </div>
+
+          <!-- English Translation Line -->
+          <div class="sub-line sub-english" id="englishLine">
+            "You are already dead."
+          </div>
+        </div>
+
+        <!-- Interactive Pronunciation & Dictionary Popover -->
+        <div class="dict-popover" id="dictPopover">
+          <div class="dict-pronunciation-badge">
+            <span class="badge-label">English Pronunciation:</span>
+            <span class="dict-romaji" id="popRomaji">omae</span>
+          </div>
+          <div class="dict-header">
+            <span class="dict-kanji" id="popKanji">お前</span>
+            <span class="dict-jlpt" id="popJlpt">N3</span>
+            <span class="dict-pos" id="popPos">Pronoun</span>
+          </div>
+          <div class="dict-meanings" id="popMeanings">you (informal/blunt, common in anime)</div>
+        </div>
+      </div>
+
+      <!-- Audio Element Controls -->
+      <div class="audio-controls">
+        <audio id="audioPlayer" controls style="width: 100%;">
+          <source id="audioSource" src="../tests/audio/sample_1_omae.wav" type="audio/wav">
+        </audio>
+        <div class="audio-buttons">
+          <button id="btnReplay" class="btn"><kbd>R</kbd> Replay Line</button>
+          <button id="btnPlayPause" class="btn btn-primary"><kbd>Space</kbd> Play / Pause</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live Transcript & Word Tokens Inspector -->
+    <section class="inspector-panel">
+      <h2>🔍 Word Token & Hover Dictionary Inspector</h2>
+      <p>Hover over any word below or on the player overlay to see the dictionary popover in action.</p>
+      <div class="token-list" id="tokenList">
+        <!-- Injected dynamically -->
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="test_player.js"></script>
+</body>
+</html>

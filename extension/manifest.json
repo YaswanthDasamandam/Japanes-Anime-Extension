@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Anime Rōmaji & Dual Subtitles (Local)",
+  "version": "1.0.0",
+  "description": "Learn Japanese with word-highlighted Rōmaji, dual English subtitles, and instant hover dictionary on video players.",
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Anime Subtitle Settings",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "lib/wanakana.min.js",
+        "lib/dict_engine.js",
+        "content/content_script.js"
+      ],
+      "css": [
+        "content/overlay.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "lib/*",
+        "content/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
