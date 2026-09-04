@@ -18,11 +18,15 @@
   let pillEnBtn = null;
   let pillCcBtn = null;
   let pillTestBtn = null;
+  let pillSizeMinus = null;
+  let pillSizePlus = null;
+  let pillSizeVal = null;
 
   // Settings
   let displayMode = 'dual'; // 'dual', 'hover', 'ruby'
   let showEnglish = true;
   let shadowingMode = false;
+  let fontScale = 1.35; // Default 135% font scale (clearly visible)
   let activeSubtitleCue = null;
   let lastPausedCue = null;
   let isTestActive = false;
@@ -42,11 +46,15 @@
 
   // Load saved preferences from extension storage
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get(['displayMode', 'showEnglish', 'shadowingMode'], (data) => {
+    chrome.storage.local.get(['displayMode', 'showEnglish', 'shadowingMode', 'fontScale'], (data) => {
       if (data.displayMode) displayMode = data.displayMode;
       if (data.showEnglish !== undefined) showEnglish = data.showEnglish;
       if (data.shadowingMode !== undefined) shadowingMode = data.shadowingMode;
-      if (overlayEl) applyDisplayMode();
+      if (data.fontScale !== undefined) fontScale = data.fontScale;
+      if (overlayEl) {
+        applyDisplayMode();
+        applyFontScale();
+      }
       updatePillButtons();
     });
 
@@ -54,9 +62,31 @@
       if (changes.displayMode) displayMode = changes.displayMode.newValue;
       if (changes.showEnglish !== undefined) showEnglish = changes.showEnglish.newValue;
       if (changes.shadowingMode !== undefined) shadowingMode = changes.shadowingMode.newValue;
+      if (changes.fontScale !== undefined) {
+        fontScale = changes.fontScale.newValue;
+        applyFontScale();
+      }
       if (overlayEl) applyDisplayMode();
       updatePillButtons();
     });
+  }
+
+  function applyFontScale() {
+    if (overlayEl) {
+      overlayEl.style.setProperty('--sub-scale', fontScale.toFixed(2));
+    }
+    if (pillSizeVal) {
+      pillSizeVal.textContent = Math.round(fontScale * 100) + '%';
+    }
+  }
+
+  function changeFontScale(delta) {
+    fontScale = Math.max(0.8, Math.min(2.5, +(fontScale + delta).toFixed(2)));
+    applyFontScale();
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ fontScale });
+    }
+    console.log('[Anime Extension] Font scale set to:', fontScale);
   }
 
   function applyDisplayMode() {
@@ -136,6 +166,7 @@
     document.body.appendChild(overlayEl);
     document.body.appendChild(dictPopover);
 
+    applyFontScale();
     makeDraggable(overlayEl, () => { userHasMovedOverlay = true; });
   }
 
@@ -152,6 +183,11 @@
         <span class="anime-pill-status-text" id="extPillStatusText">Waiting for CC</span>
       </span>
       <button class="anime-pill-btn" id="extPillModeBtn" title="Press 'M' to switch">Mode: Dual</button>
+      <div class="anime-pill-size-group" title="Adjust Subtitle Size (Hotkeys: [ or ] )">
+        <button class="anime-pill-size-btn" id="extPillSizeMinus" title="Smaller font ([)">A-</button>
+        <span class="anime-pill-size-val" id="extPillSizeVal">135%</span>
+        <button class="anime-pill-size-btn" id="extPillSizePlus" title="Larger font (])">A+</button>
+      </div>
       <button class="anime-pill-btn active" id="extPillEnBtn" title="Press 'E' to toggle">EN: ON</button>
       <button class="anime-pill-btn primary" id="extPillCcBtn" style="display:none;" title="Click to turn on CC in player">⚡ Turn on CC</button>
       <button class="anime-pill-btn" id="extPillTestBtn" title="Preview interactive anime subtitles">🧪 Test</button>
@@ -165,8 +201,23 @@
     pillEnBtn = controlPillEl.querySelector('#extPillEnBtn');
     pillCcBtn = controlPillEl.querySelector('#extPillCcBtn');
     pillTestBtn = controlPillEl.querySelector('#extPillTestBtn');
+    pillSizeMinus = controlPillEl.querySelector('#extPillSizeMinus');
+    pillSizePlus = controlPillEl.querySelector('#extPillSizePlus');
+    pillSizeVal = controlPillEl.querySelector('#extPillSizeVal');
 
     updatePillButtons();
+    applyFontScale();
+
+    // Size adjustment buttons
+    pillSizeMinus.addEventListener('click', (e) => {
+      e.stopPropagation();
+      changeFontScale(-0.15);
+    });
+
+    pillSizePlus.addEventListener('click', (e) => {
+      e.stopPropagation();
+      changeFontScale(0.15);
+    });
 
     // Mode cycle button
     pillModeBtn.addEventListener('click', (e) => {
@@ -677,6 +728,10 @@
     } else if (e.key === 'p' || e.key === 'P') {
       shadowingMode = !shadowingMode;
       console.log('[Anime Extension] Shadowing mode:', shadowingMode);
+    } else if (e.key === '[' || e.key === '{') {
+      changeFontScale(-0.15);
+    } else if (e.key === ']' || e.key === '}') {
+      changeFontScale(0.15);
     }
   });
 

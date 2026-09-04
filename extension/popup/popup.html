@@ -22,6 +22,13 @@
           <option value="ruby">Furigana (Ruby Above)</option>
         </select>
       </div>
+      <div class="option-row select-row">
+        <span>Subtitle Size (<kbd>[</kbd> / <kbd>]</kbd>)</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <input type="range" id="popFontScale" min="80" max="220" step="10" value="135" style="width: 100px; cursor: pointer;">
+          <span id="popFontScaleVal" style="font-size: 0.8rem; font-weight: 700; color: #38bdf8; min-width: 38px; text-align: right;">135%</span>
+        </div>
+      </div>
       <div class="option-row">
         <span>Dual English Subtitles (<kbd>E</kbd>)</span>
         <label class="switch">
@@ -40,6 +47,8 @@
 
     <div class="section shortcuts">
       <div class="shortcut-title">Hotkeys:</div>
+      <div class="shortcut-item"><kbd>[</kbd> / <kbd>]</kbd> Resize Subtitles (Smaller / Larger)</div>
+      <div class="shortcut-item"><kbd>M</kbd> Switch Subtitle Mode</div>
       <div class="shortcut-item"><kbd>E</kbd> Toggle English Subtitles</div>
       <div class="shortcut-item"><kbd>R</kbd> Replay Current Line</div>
       <div class="shortcut-item"><kbd>P</kbd> Toggle Shadowing Mode</div>
