@@ -5,7 +5,8 @@
   "description": "Local Japanese audio transcription, Romaji conversion, and dual subtitles",
   "scripts": {
     "test:download": "node tests/download_samples.js",
-    "test:transcribe": "node tests/run_transcription_test.js"
+    "test:transcribe": "node tests/run_transcription_test.js",
+    "package": "node scripts/package.js"
   },
   "dependencies": {
     "@huggingface/transformers": "latest",
