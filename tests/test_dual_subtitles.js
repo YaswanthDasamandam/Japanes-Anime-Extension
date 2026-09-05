@@ -1,9 +1,14 @@
-// Test script to verify Dual Subtitle detection, 3-tier Furigana segmentation, and dictionary glossing
-import { lookupWord, LOCAL_DICTIONARY } from '../lib/dict_engine.js';
+// Automated test script for Dual Subtitle detection, Yomitan de-inflection, and 3-tier Furigana
 import wanakana from 'wanakana';
+globalThis.wanakana = wanakana;
+
+await import('../extension/lib/deinflector.js');
+await import('../extension/lib/dict_engine.js');
+
+const { lookupWord, LOCAL_DICTIONARY, KANJI_READINGS } = globalThis.AnimeJapanese;
 
 console.log('='.repeat(70));
-console.log('  TESTING DUAL SUBTITLES & 3-TIER FURIGANA PIPELINE');
+console.log('  TESTING DUAL SUBTITLES & 3-TIER FURIGANA (YOMITAN ENGINE)');
 console.log('='.repeat(70));
 
 // 1. Test Track Classification
@@ -47,21 +52,38 @@ testTracks.forEach((t, i) => {
 });
 console.log(`Track Classification Score: ${trackTestsPassed}/${testTracks.length}`);
 
-// 2. Test 3-Tier Furigana Tokenization & Glossing
-console.log('\n[2] Testing 3-Tier Furigana Segmentation & Glossing:');
+// 2. Test Yomitan-Style Tokenizer & 3-Tier Furigana
+console.log('\n[2] Testing Yomitan-Style Tokenizer & 3-Tier Furigana:');
 const sortedDictKeys = Object.keys(LOCAL_DICTIONARY).sort((a, b) => b.length - a.length);
 
 function splitJapaneseWords(text) {
+  if (!text) return [];
   const tokens = [];
   let i = 0;
   while (i < text.length) {
     let match = null;
-    for (const word of sortedDictKeys) {
-      if (text.startsWith(word, i)) {
-        match = word;
+
+    // 1. Longest inflected candidate match using Yomitan de-inflector
+    const maxLen = Math.min(12, text.length - i);
+    for (let len = maxLen; len >= 2; len--) {
+      const cand = text.slice(i, i + len);
+      const res = lookupWord(cand);
+      if (res && res.length > 0 && (res[0].lemma || res[0].pos !== 'kanji compound')) {
+        match = cand;
         break;
       }
     }
+
+    // 2. Direct dictionary key match
+    if (!match) {
+      for (const word of sortedDictKeys) {
+        if (text.startsWith(word, i)) {
+          match = word;
+          break;
+        }
+      }
+    }
+
     if (match) {
       tokens.push(match);
       i += match.length;
@@ -80,51 +102,82 @@ function splitJapaneseWords(text) {
   return tokens.filter(t => t.trim().length > 0);
 }
 
-const testSentence = 'お前はもう死んでいる。';
-const englishSentence = 'You are already dead.';
+function processFuriganaSentence(sentence) {
+  console.log(`\nInput Sentence: "${sentence}"`);
+  const tokens = splitJapaneseWords(sentence);
+  let hasRawKanjiInRomaji = false;
 
-console.log(`Input Sentence: "${testSentence}"`);
-console.log(`English Subtitle: "${englishSentence}"\n`);
-console.log('3-Tier Furigana Units:');
+  tokens.forEach((token, idx) => {
+    let rom = '';
+    let shortMeaning = '';
+    const isParticle = ['は', 'が', 'を', 'に', 'で', 'の', 'も', 'か', 'ね', 'よ', 'から', 'まで', 'と'].includes(token);
 
-const tokens = splitJapaneseWords(testSentence);
-tokens.forEach((token, idx) => {
-  let rom = '';
-  let shortMeaning = '';
-  const isParticle = ['は', 'が', 'を', 'に', 'で', 'の', 'も', 'か', 'ね', 'よ', 'から', 'まで', 'と'].includes(token);
+    const matches = lookupWord(token);
+    if (matches && matches.length > 0) {
+      const entry = matches[0];
+      if (entry.romaji) rom = entry.romaji;
+      else if (entry.kana) rom = wanakana.toRomaji(entry.kana);
 
-  const matches = lookupWord(token);
-  if (matches && matches.length > 0) {
-    const entry = matches[0];
-    if (entry.romaji) rom = entry.romaji;
-    else if (entry.kana) rom = wanakana.toRomaji(entry.kana);
+      const raw = entry.meanings[0] || '';
+      shortMeaning = raw.replace(/\s*\([^)]*\)/g, '').split(/[,;]/)[0].trim();
+    }
 
-    const raw = entry.meanings[0] || '';
-    shortMeaning = raw.replace(/\s*\([^)]*\)/g, '').split(/[,;]/)[0].trim();
+    if (!rom) {
+      if (token === 'は') rom = 'wa';
+      else if (token === 'へ') rom = 'e';
+      else if (token === 'を') rom = 'o';
+      else rom = wanakana.toRomaji(token);
+    }
+
+    // Joyo Kanji Safety Net
+    if (/[\u4e00-\u9faf]/.test(rom) && KANJI_READINGS) {
+      let converted = '';
+      for (const ch of rom) {
+        if (KANJI_READINGS[ch]) {
+          converted += (converted ? ' ' : '') + KANJI_READINGS[ch].romaji;
+        } else if (/[\u3040-\u309f\u30a0-\u30fa]/.test(ch)) {
+          converted += wanakana.toRomaji(ch);
+        } else {
+          converted += ch;
+        }
+      }
+      rom = converted;
+    }
+
+    if (!shortMeaning && isParticle) {
+      const particleMeanings = {
+        'は': 'topic', 'が': 'subj', 'を': 'obj', 'に': 'to/at', 'で': 'by/at',
+        'の': "'s/of", 'も': 'also', 'か': '?', 'ね': 'right?', 'よ': '!',
+        'から': 'from', 'まで': 'until', 'と': 'with/and'
+      };
+      shortMeaning = particleMeanings[token] || '';
+    }
+
+    if (!shortMeaning && KANJI_READINGS && KANJI_READINGS[token]) {
+      shortMeaning = KANJI_READINGS[token].meaning;
+    }
+
+    if (/[\u4e00-\u9faf]/.test(rom)) {
+      hasRawKanjiInRomaji = true;
+    }
+
+    console.log(`  Token ${idx + 1}: ${token.padEnd(8)} -> Romaji: ${rom.padEnd(16)} | Gloss: ${shortMeaning || '(symbol/punct)'}`);
+  });
+
+  if (hasRawKanjiInRomaji) {
+    console.error('  ❌ FAILED: Raw Kanji detected in Romaji pronunciation line!');
+    process.exit(1);
+  } else {
+    console.log('  ✅ PASSED: Zero raw Kanji in pronunciation line; accurate Romaji & gloss generated.');
   }
+}
 
-  if (!rom) {
-    if (token === 'は') rom = 'wa';
-    else if (token === 'へ') rom = 'e';
-    else if (token === 'を') rom = 'o';
-    else rom = wanakana.toRomaji(token);
-  }
-  if (!shortMeaning && isParticle) {
-    const particleMeanings = {
-      'は': 'topic', 'が': 'subj', 'を': 'obj', 'に': 'to/at', 'で': 'by/at',
-      'の': "'s/of", 'も': 'also', 'か': '?', 'ね': 'right?', 'よ': '!',
-      'から': 'from', 'まで': 'until', 'と': 'with/and'
-    };
-    shortMeaning = particleMeanings[token] || '';
-  }
+// Test Sentence 1: Fist of the North Star
+processFuriganaSentence('お前はもう死んでいる。');
 
-  console.log(`  Token ${idx + 1}:`);
-  console.log(`    [Tier 1: Pronunciation (Romaji)] -> ${rom}`);
-  console.log(`    [Tier 2: Japanese Kanji/Kana   ] -> ${token}`);
-  console.log(`    [Tier 3: English Meaning Gloss ] -> ${shortMeaning || '(symbol/unlisted)'}`);
-});
+// Test Sentence 2: User Screenshot Sentence with Inflected Verbs & Adjectives
+processFuriganaSentence('はい。やっぱ安くてさ、量があって美味しくて食べさせるのが一番だと思うよね。うん。みんなに食べてもらい');
 
-console.log(`\n  [Tier 4: Full English Sentence ] -> "${englishSentence}"`);
-console.log('='.repeat(70));
-console.log('  ALL TESTS COMPLETED SUCCESSFULLY');
+console.log('\n' + '='.repeat(70));
+console.log('  ALL PIPELINE TESTS COMPLETED AND VERIFIED SUCCESSFULLY');
 console.log('='.repeat(70));

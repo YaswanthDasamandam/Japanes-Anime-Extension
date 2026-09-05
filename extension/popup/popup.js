@@ -1,5 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
   const popDisplayMode = document.getElementById('popDisplayMode');
+  const popReadingEngine = document.getElementById('popReadingEngine');
   const popShowEnglish = document.getElementById('popShowEnglish');
   const popShadowing = document.getElementById('popShadowing');
   const popFontScale = document.getElementById('popFontScale');
@@ -8,8 +9,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Load saved preferences
   if (chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get(['displayMode', 'showEnglish', 'shadowingMode', 'fontScale'], (data) => {
+    chrome.storage.local.get(['displayMode', 'readingEngine', 'showEnglish', 'shadowingMode', 'fontScale'], (data) => {
       if (data.displayMode !== undefined) popDisplayMode.value = data.displayMode;
+      if (data.readingEngine !== undefined && popReadingEngine) popReadingEngine.value = data.readingEngine;
       if (data.showEnglish !== undefined) popShowEnglish.checked = data.showEnglish;
       if (data.shadowingMode !== undefined) popShadowing.checked = data.shadowingMode;
       if (data.fontScale !== undefined) {
@@ -26,6 +28,14 @@ document.addEventListener('DOMContentLoaded', () => {
       chrome.storage.local.set({ displayMode: popDisplayMode.value });
     }
   });
+
+  if (popReadingEngine) {
+    popReadingEngine.addEventListener('change', () => {
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ readingEngine: popReadingEngine.value });
+      }
+    });
+  }
 
   popFontScale.addEventListener('input', () => {
     popFontScaleVal.textContent = popFontScale.value + '%';

@@ -15,6 +15,7 @@
   let pillStatusEl = null;
   let pillStatusTextEl = null;
   let pillModeBtn = null;
+  let pillEngineBtn = null;
   let pillEnBtn = null;
   let pillCcBtn = null;
   let pillTestBtn = null;
@@ -24,6 +25,7 @@
 
   // Settings
   let displayMode = 'dual'; // 'dual', 'hover', 'ruby'
+  let readingEngine = 'local'; // 'local' (Fast Yomitan ⚡), 'hybrid', 'neural'
   let showEnglish = true;
   let shadowingMode = false;
   let fontScale = 1.35; // Default 135% font scale (clearly visible)
@@ -38,6 +40,7 @@
   let lastRenderedJapanese = '';
   let lastRenderedEnglish = '';
   const translationCache = new Map();
+  const romanizationCache = new Map();
   let loadedJapaneseCues = [];
   let loadedEnglishCues = [];
   let preFetchQueue = [];
@@ -77,8 +80,9 @@
 
   // Load saved preferences from extension storage
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get(['displayMode', 'showEnglish', 'shadowingMode', 'fontScale'], (data) => {
+    chrome.storage.local.get(['displayMode', 'showEnglish', 'shadowingMode', 'fontScale', 'readingEngine'], (data) => {
       if (data.displayMode) displayMode = data.displayMode;
+      if (data.readingEngine) readingEngine = data.readingEngine;
       if (data.showEnglish !== undefined) showEnglish = data.showEnglish;
       if (data.shadowingMode !== undefined) shadowingMode = data.shadowingMode;
       if (data.fontScale !== undefined) fontScale = data.fontScale;
@@ -91,6 +95,10 @@
 
     chrome.storage.onChanged.addListener((changes) => {
       if (changes.displayMode) displayMode = changes.displayMode.newValue;
+      if (changes.readingEngine) {
+        readingEngine = changes.readingEngine.newValue;
+        if (activeSubtitleCue) updateSubtitleDisplay(activeSubtitleCue.text);
+      }
       if (changes.showEnglish !== undefined) showEnglish = changes.showEnglish.newValue;
       if (changes.shadowingMode !== undefined) shadowingMode = changes.shadowingMode.newValue;
       if (changes.fontScale !== undefined) {
@@ -134,6 +142,14 @@
     if (pillModeBtn) {
       const labels = { dual: 'Dual', hover: 'Hover-Only', ruby: 'Furigana' };
       pillModeBtn.textContent = `Mode: ${labels[displayMode] || displayMode}`;
+    }
+    if (pillEngineBtn) {
+      const engineLabels = {
+        local: 'Engine: Local ⚡',
+        hybrid: 'Engine: Hybrid',
+        neural: 'Engine: Cloud AI'
+      };
+      pillEngineBtn.textContent = engineLabels[readingEngine] || `Engine: ${readingEngine}`;
     }
     if (pillEnBtn) {
       pillEnBtn.textContent = showEnglish ? 'EN: ON' : 'EN: OFF';
@@ -214,6 +230,7 @@
         <span class="anime-pill-status-text" id="extPillStatusText">Waiting for CC</span>
       </span>
       <button class="anime-pill-btn" id="extPillModeBtn" title="Press 'M' to switch">Mode: Dual</button>
+      <button class="anime-pill-btn" id="extPillEngineBtn" title="Click to cycle reading engine (Local Yomitan ⚡ / Hybrid / Cloud AI)">Engine: Local ⚡</button>
       <div class="anime-pill-size-group" title="Adjust Subtitle Size (Hotkeys: [ or ] )">
         <button class="anime-pill-size-btn" id="extPillSizeMinus" title="Smaller font ([)">A-</button>
         <span class="anime-pill-size-val" id="extPillSizeVal">135%</span>
@@ -229,6 +246,7 @@
     pillStatusEl = controlPillEl.querySelector('#extPillStatus');
     pillStatusTextEl = controlPillEl.querySelector('#extPillStatusText');
     pillModeBtn = controlPillEl.querySelector('#extPillModeBtn');
+    pillEngineBtn = controlPillEl.querySelector('#extPillEngineBtn');
     pillEnBtn = controlPillEl.querySelector('#extPillEnBtn');
     pillCcBtn = controlPillEl.querySelector('#extPillCcBtn');
     pillTestBtn = controlPillEl.querySelector('#extPillTestBtn');
@@ -254,6 +272,12 @@
     pillModeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       cycleDisplayMode();
+    });
+
+    // Reading engine cycle button
+    pillEngineBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cycleReadingEngine();
     });
 
     // English toggle button
@@ -296,6 +320,20 @@
     }
     applyDisplayMode();
     console.log('[Anime Extension] Mode set to:', displayMode);
+  }
+
+  function cycleReadingEngine() {
+    const engines = ['local', 'hybrid', 'neural'];
+    const nextIdx = (engines.indexOf(readingEngine) + 1) % engines.length;
+    readingEngine = engines[nextIdx];
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ readingEngine });
+    }
+    updatePillButtons();
+    console.log('[Anime Extension] Reading engine set to:', readingEngine);
+    if (activeSubtitleCue) {
+      updateSubtitleDisplay(activeSubtitleCue.text);
+    }
   }
 
   function positionElements(video) {
@@ -384,7 +422,7 @@
     if (dictPopover) dictPopover.classList.remove('visible');
   }
 
-  // Greedy dictionary segmentation + morphological tokenization
+  // Greedy dictionary segmentation + morphological Yomitan tokenization
   function splitJapaneseWords(text) {
     if (!text) return [];
     if (sortedDictKeys.length === 0) initDictKeys();
@@ -393,12 +431,30 @@
     let i = 0;
     while (i < text.length) {
       let match = null;
-      for (const word of sortedDictKeys) {
-        if (text.startsWith(word, i)) {
-          match = word;
-          break;
+
+      // 1. Check longest inflected candidate using Yomitan de-inflector
+      const maxLen = Math.min(12, text.length - i);
+      for (let len = maxLen; len >= 2; len--) {
+        const cand = text.slice(i, i + len);
+        if (window.AnimeJapanese && window.AnimeJapanese.lookupWord) {
+          const res = window.AnimeJapanese.lookupWord(cand);
+          if (res && res.length > 0 && (res[0].lemma || res[0].pos !== 'kanji compound')) {
+            match = cand;
+            break;
+          }
         }
       }
+
+      // 2. Direct dictionary match
+      if (!match) {
+        for (const word of sortedDictKeys) {
+          if (text.startsWith(word, i)) {
+            match = word;
+            break;
+          }
+        }
+      }
+
       if (match) {
         tokens.push(match);
         i += match.length;
@@ -501,7 +557,7 @@
     }
   }
 
-  // Asynchronous real-time translation with memory cache
+  // Asynchronous real-time translation with memory cache and contextual neural romanization
   async function fetchEnglishTranslation(japaneseText) {
     if (!japaneseText || !japaneseText.trim()) return '';
     const clean = japaneseText.replace(/<[^>]+>/g, '').trim();
@@ -509,14 +565,25 @@
       return translationCache.get(clean);
     }
 
-    // 1. Try public web translation API
+    // 1. Try public web translation API (requesting translation &dt=t and romanization &dt=rm)
     try {
-      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ja&tl=en&dt=t&q=${encodeURIComponent(clean)}`;
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ja&tl=en&dt=t&dt=rm&q=${encodeURIComponent(clean)}`;
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         if (data && data[0]) {
-          const translated = data[0].map(item => item[0]).filter(Boolean).join('');
+          const translated = data[0].map(item => item && item[0]).filter(Boolean).join('');
+          let fullRomanization = '';
+          if (Array.isArray(data[0])) {
+            for (const item of data[0]) {
+              if (item && item[3]) {
+                fullRomanization += (fullRomanization ? ' ' : '') + item[3];
+              }
+            }
+          }
+          if (fullRomanization) {
+            romanizationCache.set(clean, fullRomanization);
+          }
           if (translated) {
             translationCache.set(clean, translated);
             return translated;
@@ -582,6 +649,11 @@
             if (currentJa === cleanJa || currentYt === cleanJa || isTestActive) {
               englishEl.textContent = translated;
               if (showEnglish) englishEl.style.display = 'block';
+
+              // If Neural engine mode is selected and contextual romanization is ready, refine Romaji line
+              if (readingEngine === 'neural' && displayMode !== 'ruby' && romanizationCache.has(cleanJa)) {
+                romajiEl.textContent = romanizationCache.get(cleanJa);
+              }
             }
           }
         });
@@ -636,6 +708,21 @@
         }
       }
 
+      // Joyo Kanji Safety Net: ensure NO raw Kanji ever appears in the pronunciation tier
+      if (/[\u4e00-\u9faf]/.test(rom) && window.AnimeJapanese && window.AnimeJapanese.KANJI_READINGS) {
+        let converted = '';
+        for (const ch of rom) {
+          if (window.AnimeJapanese.KANJI_READINGS[ch]) {
+            converted += (converted ? ' ' : '') + window.AnimeJapanese.KANJI_READINGS[ch].romaji;
+          } else if (window.wanakana && /[\u3040-\u309f\u30a0-\u30fa]/.test(ch)) {
+            converted += window.wanakana.toRomaji(ch);
+          } else {
+            converted += ch;
+          }
+        }
+        rom = converted;
+      }
+
       rSpan.textContent = rom;
       rSpan.dataset.surface = token;
       rSpan.dataset.romaji = rom;
@@ -647,6 +734,10 @@
           'から': 'from', 'まで': 'until', 'と': 'with/and'
         };
         shortMeaning = particleMeanings[token] || '';
+      }
+
+      if (!shortMeaning && window.AnimeJapanese && window.AnimeJapanese.KANJI_READINGS && window.AnimeJapanese.KANJI_READINGS[token]) {
+        shortMeaning = window.AnimeJapanese.KANJI_READINGS[token].meaning;
       }
 
       // Mutual hover & dictionary popover

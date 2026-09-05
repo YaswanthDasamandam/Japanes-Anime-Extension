@@ -26,6 +26,7 @@
       "matches": ["<all_urls>"],
       "js": [
         "lib/wanakana.min.js",
+        "lib/deinflector.js",
         "lib/dict_engine.js",
         "content/content_script.js"
       ],

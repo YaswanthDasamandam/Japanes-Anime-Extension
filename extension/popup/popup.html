@@ -23,6 +23,14 @@
         </select>
       </div>
       <div class="option-row select-row">
+        <span>Reading Engine</span>
+        <select id="popReadingEngine">
+          <option value="local">Fast Local (Yomitan) ⚡</option>
+          <option value="hybrid">Hybrid (Local + Cloud)</option>
+          <option value="neural">Cloud Neural (Google AI)</option>
+        </select>
+      </div>
+      <div class="option-row select-row">
         <span>Subtitle Size (<kbd>[</kbd> / <kbd>]</kbd>)</span>
         <div style="display: flex; align-items: center; gap: 8px;">
           <input type="range" id="popFontScale" min="80" max="220" step="10" value="135" style="width: 100px; cursor: pointer;">
