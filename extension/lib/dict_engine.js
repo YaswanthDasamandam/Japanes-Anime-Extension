@@ -104,6 +104,10 @@
     '今': { kana: 'いま', romaji: 'ima', meanings: ['now, right now'], pos: 'noun / adverb', jlpt: 'N5' },
     '時': { kana: 'とき', romaji: 'toki', meanings: ['time, moment, occasion'], pos: 'noun', jlpt: 'N5' },
     '時間': { kana: 'じかん', romaji: 'jikan', meanings: ['time, duration, hours'], pos: 'noun', jlpt: 'N5' },
+    '睡眠': { kana: 'すいみん', romaji: 'suimin', meanings: ['sleep, slumber'], pos: 'noun / suru-verb', jlpt: 'N3' },
+    '過酷': { kana: 'かこく', romaji: 'kakoku', meanings: ['harsh, severe, cruel, rigorous'], pos: 'na-adjective / noun', jlpt: 'N1' },
+    '酷': { kana: 'こく', romaji: 'koku', meanings: ['cruel, severe, harsh'], pos: 'na-adjective / noun', jlpt: 'N1' },
+    'こと': { kana: 'こと', romaji: 'koto', meanings: ['thing, matter, fact'], pos: 'noun', jlpt: 'N5' },
     '雨': { kana: 'あめ', romaji: 'ame', meanings: ['rain'], pos: 'noun', jlpt: 'N5' },
     '天気': { kana: 'てんき', romaji: 'tenki', meanings: ['weather'], pos: 'noun', jlpt: 'N5' },
     '力': { kana: 'ちから', romaji: 'chikara', meanings: ['power, strength, force'], pos: 'noun', jlpt: 'N4' },
@@ -126,6 +130,7 @@
     'よ': { kana: 'よ', romaji: 'yo', meanings: ['emphasis particle ("I tell you!")'], pos: 'particle', jlpt: 'N5' },
     'よね': { kana: 'よね', romaji: 'yone', meanings: ['confirmation particle ("you know, right?")'], pos: 'particle', jlpt: 'N5' },
     'さ': { kana: 'さ', romaji: 'sa', meanings: ['casual sentence particle ("you see...")'], pos: 'particle', jlpt: 'N4' },
+    'って': { kana: 'って', romaji: 'tte', meanings: ['quotation particle ("saying that...", "about...")'], pos: 'particle', jlpt: 'N5' },
     'から': { kana: 'から', romaji: 'kara', meanings: ['from, since, because'], pos: 'particle', jlpt: 'N5' },
     'まで': { kana: 'まで', romaji: 'made', meanings: ['until, up to, as far as'], pos: 'particle', jlpt: 'N5' },
     'と': { kana: 'と', romaji: 'to', meanings: ['and, with (connector or companion)'], pos: 'particle', jlpt: 'N5' },
@@ -228,6 +233,22 @@
     '皆': { kana: 'みな', romaji: 'mina', meaning: 'everyone, all' }
   };
 
+  const KANJI_TABLE = (typeof window !== 'undefined' && window.AnimeKanjiTable) ||
+                      (typeof globalThis !== 'undefined' && globalThis.AnimeKanjiTable) ||
+                      (typeof AnimeKanjiTable !== 'undefined' ? AnimeKanjiTable : null) || {};
+
+  function getKanjiInfo(ch) {
+    if (KANJI_READINGS[ch]) return KANJI_READINGS[ch];
+    if (KANJI_TABLE[ch]) {
+      const entry = KANJI_TABLE[ch];
+      if (Array.isArray(entry)) {
+        return { kana: entry[0], romaji: entry[1], meaning: entry[2] || '' };
+      }
+      return entry;
+    }
+    return null;
+  }
+
   const romajiIndex = new Map();
   for (const [key, entry] of Object.entries(LOCAL_DICTIONARY)) {
     const normRomaji = entry.romaji.toLowerCase().replace(/[\s\-_]/g, '');
@@ -314,44 +335,47 @@
       }
     }
 
-    // 4. Joyo Kanji Character Reading Map (Ensures raw Kanji never shows)
-    if (KANJI_READINGS[clean]) {
-      const k = KANJI_READINGS[clean];
+    // 4. Single Joyo / Common Kanji Character Reading Map
+    const singleInfo = getKanjiInfo(clean);
+    if (singleInfo) {
       return [{
         kanji: clean,
-        kana: k.kana,
-        romaji: k.romaji,
-        meanings: [k.meaning],
+        kana: singleInfo.kana,
+        romaji: singleInfo.romaji,
+        meanings: [singleInfo.meaning || 'kanji'],
         pos: 'kanji',
-        jlpt: 'N3'
+        jlpt: 'Joyo'
       }];
     }
 
-    // 5. Multi-character Kanji compound fallback
+    // 5. Multi-character Kanji compound fallback (e.g. 睡眠, 過酷, 絶望, 病院)
     if (/^[\u4e00-\u9faf]+$/.test(clean)) {
       let combinedKana = '';
-      let combinedRomaji = '';
-      let combinedMeaning = [];
+      let combinedMeanings = [];
       let foundAny = false;
 
       for (const char of clean) {
-        if (KANJI_READINGS[char]) {
+        const info = getKanjiInfo(char);
+        if (info) {
           foundAny = true;
-          combinedKana += KANJI_READINGS[char].kana;
-          combinedRomaji += (combinedRomaji ? ' ' : '') + KANJI_READINGS[char].romaji;
-          combinedMeaning.push(KANJI_READINGS[char].meaning);
+          combinedKana += info.kana;
+          combinedMeanings.push(info.meaning || char);
         } else {
           combinedKana += char;
-          combinedRomaji += (combinedRomaji ? ' ' : '') + char;
         }
       }
 
       if (foundAny) {
+        const w = (typeof window !== 'undefined' && window.wanakana) ||
+                  (typeof globalThis !== 'undefined' && globalThis.wanakana) ||
+                  (typeof wanakana !== 'undefined' ? wanakana : null);
+        const combinedRomaji = (w && w.toRomaji) ? w.toRomaji(combinedKana) : combinedKana;
+
         return [{
           kanji: clean,
           kana: combinedKana,
           romaji: combinedRomaji,
-          meanings: [combinedMeaning.join('; ')],
+          meanings: [combinedMeanings.join('; ')],
           pos: 'kanji compound',
           jlpt: 'Vocab'
         }];
@@ -364,6 +388,7 @@
   const exportObj = {
     LOCAL_DICTIONARY,
     KANJI_READINGS,
+    getKanjiInfo,
     lookupWord
   };
 

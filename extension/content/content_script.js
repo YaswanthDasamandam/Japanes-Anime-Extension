@@ -709,18 +709,25 @@
       }
 
       // Joyo Kanji Safety Net: ensure NO raw Kanji ever appears in the pronunciation tier
-      if (/[\u4e00-\u9faf]/.test(rom) && window.AnimeJapanese && window.AnimeJapanese.KANJI_READINGS) {
-        let converted = '';
+      if (/[\u4e00-\u9faf]/.test(rom) && window.AnimeJapanese) {
+        let convertedKana = '';
         for (const ch of rom) {
-          if (window.AnimeJapanese.KANJI_READINGS[ch]) {
-            converted += (converted ? ' ' : '') + window.AnimeJapanese.KANJI_READINGS[ch].romaji;
-          } else if (window.wanakana && /[\u3040-\u309f\u30a0-\u30fa]/.test(ch)) {
-            converted += window.wanakana.toRomaji(ch);
+          const info = window.AnimeJapanese.getKanjiInfo
+            ? window.AnimeJapanese.getKanjiInfo(ch)
+            : (window.AnimeJapanese.KANJI_READINGS && window.AnimeJapanese.KANJI_READINGS[ch]);
+          if (info && info.kana) {
+            convertedKana += info.kana;
+          } else if (info && info.romaji) {
+            convertedKana += info.romaji;
           } else {
-            converted += ch;
+            convertedKana += ch;
           }
         }
-        rom = converted;
+        if (window.wanakana) {
+          rom = window.wanakana.toRomaji(convertedKana);
+        } else {
+          rom = convertedKana;
+        }
       }
 
       rSpan.textContent = rom;
@@ -736,8 +743,20 @@
         shortMeaning = particleMeanings[token] || '';
       }
 
-      if (!shortMeaning && window.AnimeJapanese && window.AnimeJapanese.KANJI_READINGS && window.AnimeJapanese.KANJI_READINGS[token]) {
-        shortMeaning = window.AnimeJapanese.KANJI_READINGS[token].meaning;
+      if (!shortMeaning && window.AnimeJapanese) {
+        const info = window.AnimeJapanese.getKanjiInfo
+          ? window.AnimeJapanese.getKanjiInfo(token)
+          : (window.AnimeJapanese.KANJI_READINGS && window.AnimeJapanese.KANJI_READINGS[token]);
+        if (info && info.meaning) {
+          shortMeaning = info.meaning;
+        } else if (/^[\u4e00-\u9faf]+$/.test(token) && window.AnimeJapanese.getKanjiInfo) {
+          const meanings = [];
+          for (const ch of token) {
+            const ci = window.AnimeJapanese.getKanjiInfo(ch);
+            if (ci && ci.meaning) meanings.push(ci.meaning);
+          }
+          if (meanings.length > 0) shortMeaning = meanings.join('; ');
+        }
       }
 
       // Mutual hover & dictionary popover

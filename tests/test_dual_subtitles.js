@@ -3,9 +3,10 @@ import wanakana from 'wanakana';
 globalThis.wanakana = wanakana;
 
 await import('../extension/lib/deinflector.js');
+await import('../extension/lib/kanji_table.js');
 await import('../extension/lib/dict_engine.js');
 
-const { lookupWord, LOCAL_DICTIONARY, KANJI_READINGS } = globalThis.AnimeJapanese;
+const { lookupWord, LOCAL_DICTIONARY, KANJI_READINGS, getKanjiInfo } = globalThis.AnimeJapanese;
 
 console.log('='.repeat(70));
 console.log('  TESTING DUAL SUBTITLES & 3-TIER FURIGANA (YOMITAN ENGINE)');
@@ -110,7 +111,7 @@ function processFuriganaSentence(sentence) {
   tokens.forEach((token, idx) => {
     let rom = '';
     let shortMeaning = '';
-    const isParticle = ['は', 'が', 'を', 'に', 'で', 'の', 'も', 'か', 'ね', 'よ', 'から', 'まで', 'と'].includes(token);
+    const isParticle = ['は', 'が', 'を', 'に', 'で', 'の', 'も', 'か', 'ね', 'よ', 'から', 'まで', 'と', 'って'].includes(token);
 
     const matches = lookupWord(token);
     if (matches && matches.length > 0) {
@@ -130,38 +131,49 @@ function processFuriganaSentence(sentence) {
     }
 
     // Joyo Kanji Safety Net
-    if (/[\u4e00-\u9faf]/.test(rom) && KANJI_READINGS) {
-      let converted = '';
+    if (/[\u4e00-\u9faf]/.test(rom) && globalThis.AnimeJapanese) {
+      let convertedKana = '';
       for (const ch of rom) {
-        if (KANJI_READINGS[ch]) {
-          converted += (converted ? ' ' : '') + KANJI_READINGS[ch].romaji;
-        } else if (/[\u3040-\u309f\u30a0-\u30fa]/.test(ch)) {
-          converted += wanakana.toRomaji(ch);
+        const info = getKanjiInfo ? getKanjiInfo(ch) : (KANJI_READINGS && KANJI_READINGS[ch]);
+        if (info && info.kana) {
+          convertedKana += info.kana;
+        } else if (info && info.romaji) {
+          convertedKana += info.romaji;
         } else {
-          converted += ch;
+          convertedKana += ch;
         }
       }
-      rom = converted;
+      rom = wanakana.toRomaji(convertedKana);
     }
 
     if (!shortMeaning && isParticle) {
       const particleMeanings = {
         'は': 'topic', 'が': 'subj', 'を': 'obj', 'に': 'to/at', 'で': 'by/at',
         'の': "'s/of", 'も': 'also', 'か': '?', 'ね': 'right?', 'よ': '!',
-        'から': 'from', 'まで': 'until', 'と': 'with/and'
+        'から': 'from', 'まで': 'until', 'と': 'with/and', 'って': 'quotation'
       };
       shortMeaning = particleMeanings[token] || '';
     }
 
-    if (!shortMeaning && KANJI_READINGS && KANJI_READINGS[token]) {
-      shortMeaning = KANJI_READINGS[token].meaning;
+    if (!shortMeaning && globalThis.AnimeJapanese) {
+      const info = getKanjiInfo ? getKanjiInfo(token) : (KANJI_READINGS && KANJI_READINGS[token]);
+      if (info && info.meaning) {
+        shortMeaning = info.meaning;
+      } else if (/^[\u4e00-\u9faf]+$/.test(token) && getKanjiInfo) {
+        const meanings = [];
+        for (const ch of token) {
+          const ci = getKanjiInfo(ch);
+          if (ci && ci.meaning) meanings.push(ci.meaning);
+        }
+        if (meanings.length > 0) shortMeaning = meanings.join('; ');
+      }
     }
 
     if (/[\u4e00-\u9faf]/.test(rom)) {
       hasRawKanjiInRomaji = true;
     }
 
-    console.log(`  Token ${idx + 1}: ${token.padEnd(8)} -> Romaji: ${rom.padEnd(16)} | Gloss: ${shortMeaning || '(symbol/punct)'}`);
+    console.log(`  Token ${idx + 1}: ${token.padEnd(10)} -> Romaji: ${rom.padEnd(16)} | Gloss: ${shortMeaning || '(symbol/punct)'}`);
   });
 
   if (hasRawKanjiInRomaji) {
@@ -175,8 +187,11 @@ function processFuriganaSentence(sentence) {
 // Test Sentence 1: Fist of the North Star
 processFuriganaSentence('お前はもう死んでいる。');
 
-// Test Sentence 2: User Screenshot Sentence with Inflected Verbs & Adjectives
+// Test Sentence 2: User Screenshot 1 with Inflected Verbs & Adjectives
 processFuriganaSentence('はい。やっぱ安くてさ、量があって美味しくて食べさせるのが一番だと思うよね。うん。みんなに食べてもらい');
+
+// Test Sentence 3: User Screenshot 2 with 睡眠, 酷, and 過酷
+processFuriganaSentence('時間睡眠ってことですかね。酷なんですね。過酷だよね。');
 
 console.log('\n' + '='.repeat(70));
 console.log('  ALL PIPELINE TESTS COMPLETED AND VERIFIED SUCCESSFULLY');

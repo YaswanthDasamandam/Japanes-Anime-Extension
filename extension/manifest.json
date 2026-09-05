@@ -27,6 +27,7 @@
       "js": [
         "lib/wanakana.min.js",
         "lib/deinflector.js",
+        "lib/kanji_table.js",
         "lib/dict_engine.js",
         "content/content_script.js"
       ],
