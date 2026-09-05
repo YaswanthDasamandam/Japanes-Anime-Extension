@@ -1,4 +1,11 @@
-import { lookupWord } from '../lib/dict_engine.js';
+import wanakana from 'wanakana';
+globalThis.wanakana = wanakana;
+
+await import('../lib/deinflector.js');
+await import('../lib/kanji_table.js');
+await import('../lib/dict_engine.js');
+
+const { lookupWord } = globalThis.AnimeJapanese;
 
 console.log('='.repeat(65));
 console.log('  LOCAL JAPANESE-ENGLISH HOVER DICTIONARY TEST');

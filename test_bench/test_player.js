@@ -400,6 +400,12 @@ audioPlayer.addEventListener('pause', () => {
   syncSubtitleLoop(); // Single update on pause
 });
 
+audioPlayer.addEventListener('ended', () => {
+  btnPlayPause.innerHTML = '<kbd>Space</kbd> Play';
+  if (animFrameId) cancelAnimationFrame(animFrameId);
+  syncSubtitleLoop();
+});
+
 audioPlayer.addEventListener('seeking', () => {
   syncSubtitleLoop();
 });

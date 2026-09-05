@@ -1,9 +1,12 @@
-import { lookupWord, LOCAL_DICTIONARY } from '../lib/dict_engine.js';
-import * as wanakana from 'wanakana';
+import wanakana from 'wanakana';
+globalThis.wanakana = wanakana;
 
-// Mock window globals for node environment
-global.AnimeJapanese = { lookupWord, LOCAL_DICTIONARY };
-global.wanakana = wanakana;
+await import('../lib/deinflector.js');
+await import('../lib/kanji_table.js');
+await import('../lib/dict_engine.js');
+
+const { lookupWord, LOCAL_DICTIONARY } = globalThis.AnimeJapanese;
+global.AnimeJapanese = globalThis.AnimeJapanese;
 
 console.log('='.repeat(70));
 console.log('  SUBTITLE PRE-LOADING & LOOKAHEAD CACHE UNIT TEST');

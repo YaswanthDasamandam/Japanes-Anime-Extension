@@ -22,6 +22,7 @@
   let pillSizeMinus = null;
   let pillSizePlus = null;
   let pillSizeVal = null;
+  let subAnimId = null;
 
   // Settings
   let displayMode = 'dual'; // 'dual', 'hover', 'ruby'
@@ -808,32 +809,83 @@
     });
   }
 
-  // Simulated Karaoke Animation for non-timed subtitles or test captions
+  // Simulated Karaoke Animation for non-timed subtitles or test captions (pause & resume aware)
   let simulatedKaraokeInterval = null;
-  function startSimulatedKaraoke(durationMs = 3000) {
-    if (simulatedKaraokeInterval) clearInterval(simulatedKaraokeInterval);
+  let simulatedKaraokeCurrentIdx = 0;
+  let simulatedKaraokeTotal = 0;
+  let simulatedKaraokeIntervalMs = 200;
+  let isSimulatedKaraokePaused = false;
+
+  function stopSimulatedKaraoke() {
+    if (simulatedKaraokeInterval) {
+      clearInterval(simulatedKaraokeInterval);
+      simulatedKaraokeInterval = null;
+    }
+    simulatedKaraokeCurrentIdx = 0;
+    simulatedKaraokeTotal = 0;
+    isSimulatedKaraokePaused = false;
+  }
+
+  function pauseSimulatedKaraoke() {
+    if (simulatedKaraokeInterval) {
+      clearInterval(simulatedKaraokeInterval);
+      simulatedKaraokeInterval = null;
+    }
+    isSimulatedKaraokePaused = true;
+  }
+
+  function resumeSimulatedKaraoke() {
+    if (isSimulatedKaraokePaused && simulatedKaraokeTotal > 0 && simulatedKaraokeCurrentIdx < simulatedKaraokeTotal) {
+      if (!targetVideo || !targetVideo.paused) {
+        isSimulatedKaraokePaused = false;
+        applySimulatedKaraokeHighlight(simulatedKaraokeCurrentIdx);
+        simulatedKaraokeInterval = setInterval(stepSimulatedKaraoke, simulatedKaraokeIntervalMs);
+      }
+    }
+  }
+
+  function applySimulatedKaraokeHighlight(idx) {
     const kTokens = kanjiEl ? kanjiEl.querySelectorAll('.anime-kanji-token') : [];
     const rTokens = romajiEl ? romajiEl.querySelectorAll('.anime-word-token') : [];
     const rubyUnits = kanjiEl ? kanjiEl.querySelectorAll('.anime-ruby-unit') : [];
     const total = Math.max(kTokens.length, rTokens.length, rubyUnits.length);
-    if (total === 0) return;
 
-    let currentIdx = 0;
-    const intervalMs = Math.max(100, Math.floor(durationMs / total));
+    for (let i = 0; i < total; i++) {
+      const isActive = (i === idx);
+      if (rTokens[i]) rTokens[i].classList.toggle('active', isActive);
+      if (kTokens[i]) kTokens[i].classList.toggle('active', isActive);
+      if (rubyUnits[i]) rubyUnits[i].classList.toggle('active', isActive);
+    }
+  }
 
-    simulatedKaraokeInterval = setInterval(() => {
-      for (let i = 0; i < total; i++) {
-        const isActive = (i === currentIdx);
-        if (rTokens[i]) rTokens[i].classList.toggle('active', isActive);
-        if (kTokens[i]) kTokens[i].classList.toggle('active', isActive);
-        if (rubyUnits[i]) rubyUnits[i].classList.toggle('active', isActive);
-      }
-      currentIdx++;
-      if (currentIdx >= total) {
-        clearInterval(simulatedKaraokeInterval);
-        simulatedKaraokeInterval = null;
-      }
-    }, intervalMs);
+  function stepSimulatedKaraoke() {
+    applySimulatedKaraokeHighlight(simulatedKaraokeCurrentIdx);
+    simulatedKaraokeCurrentIdx++;
+    if (simulatedKaraokeCurrentIdx >= simulatedKaraokeTotal) {
+      stopSimulatedKaraoke();
+    }
+  }
+
+  function startSimulatedKaraoke(durationMs = 3000) {
+    stopSimulatedKaraoke();
+    const kTokens = kanjiEl ? kanjiEl.querySelectorAll('.anime-kanji-token') : [];
+    const rTokens = romajiEl ? romajiEl.querySelectorAll('.anime-word-token') : [];
+    const rubyUnits = kanjiEl ? kanjiEl.querySelectorAll('.anime-ruby-unit') : [];
+    simulatedKaraokeTotal = Math.max(kTokens.length, rTokens.length, rubyUnits.length);
+    if (simulatedKaraokeTotal === 0) return;
+
+    simulatedKaraokeCurrentIdx = 0;
+    simulatedKaraokeIntervalMs = Math.max(100, Math.floor(durationMs / simulatedKaraokeTotal));
+
+    // If video is currently paused, highlight first token and freeze without running timer
+    if (targetVideo && targetVideo.paused) {
+      isSimulatedKaraokePaused = true;
+      applySimulatedKaraokeHighlight(0);
+      return;
+    }
+
+    stepSimulatedKaraoke();
+    simulatedKaraokeInterval = setInterval(stepSimulatedKaraoke, simulatedKaraokeIntervalMs);
   }
 
   // Demo quotes for interactive instant testing
@@ -865,12 +917,30 @@
     demoIdx++;
 
     updateSubtitleDisplay(quote.ja, quote.en);
-    startSimulatedKaraoke(3200);
+
+    if (targetVideo) {
+      const curTime = targetVideo.currentTime;
+      const durationSec = 3.2;
+      activeSubtitleCue = {
+        startTime: curTime,
+        endTime: curTime + durationSec,
+        text: quote.ja
+      };
+      if (!targetVideo.paused) {
+        if (subAnimId) cancelAnimationFrame(subAnimId);
+        subAnimId = requestAnimationFrame(syncVideoFrame);
+      } else {
+        syncVideoFrame();
+      }
+    } else {
+      startSimulatedKaraoke(3200);
+    }
     updatePillStatus(true, 'Test Subtitle Active (Hover any word!)');
 
     testTimer = setTimeout(() => {
       isTestActive = false;
-      if (!lastYouTubeText && !activeSubtitleCue) {
+      if (!lastYouTubeText && (!activeSubtitleCue || activeSubtitleCue.text === quote.ja)) {
+        activeSubtitleCue = null;
         if (overlayEl) overlayEl.style.display = 'none';
         updatePillStatus(false, 'Waiting for CC');
       }
@@ -914,10 +984,27 @@
           const hasJapanese = /[\u3040-\u309f\u30a0-\u30fa\u4e00-\u9faf]/.test(fullText);
           if (hasJapanese) {
             updateSubtitleDisplay(fullText, '');
-            startSimulatedKaraoke(Math.max(2000, fullText.length * 280));
+            const curTime = targetVideo ? targetVideo.currentTime : 0;
+            const durationSec = Math.max(2.0, fullText.length * 0.28);
+            activeSubtitleCue = {
+              startTime: curTime,
+              endTime: curTime + durationSec,
+              text: fullText
+            };
             updatePillStatus(true, 'Japanese CC Active (+ English)');
+
+            if (targetVideo && !targetVideo.paused) {
+              if (subAnimId) cancelAnimationFrame(subAnimId);
+              subAnimId = requestAnimationFrame(syncVideoFrame);
+            } else if (!targetVideo) {
+              startSimulatedKaraoke(durationSec * 1000);
+            } else {
+              // Video is currently paused - freeze subtitle without animating
+              syncVideoFrame();
+            }
           } else {
             // Text is English captions
+            activeSubtitleCue = null;
             updateSubtitleDisplay('', fullText);
             updatePillStatus(true, 'English CC Active');
           }
@@ -925,7 +1012,9 @@
       } else {
         if (lastYouTubeText !== '') {
           lastYouTubeText = '';
-          if (!isTestActive && !activeSubtitleCue) {
+          activeSubtitleCue = null;
+          stopSimulatedKaraoke();
+          if (!isTestActive) {
             if (overlayEl) overlayEl.style.display = 'none';
             updatePillStatus(false, 'Waiting for CC');
           }
@@ -944,8 +1033,6 @@
   // Monitor standard HTML5 video player subtitles (Native CC detection with 60FPS dual-track sync)
   function attachSubtitleListener(video) {
     if (!video) return;
-
-    let subAnimId = null;
 
     function indexTracks() {
       if (!video.textTracks || video.textTracks.length === 0) return;
@@ -977,6 +1064,18 @@
                 text: text
               });
               hasNewJaCues = true;
+            }
+          }
+        } else if (isEnglishTrack(track, sampleText)) {
+          for (let c = 0; c < track.cues.length; c++) {
+            const cue = track.cues[c];
+            const text = (cue.text || '').replace(/<[^>]+>/g, '').trim();
+            if (text) {
+              loadedEnglishCues.push({
+                startTime: cue.startTime,
+                endTime: cue.endTime,
+                text: text
+              });
             }
           }
         }
@@ -1076,6 +1175,14 @@
           }
         }
 
+        // Fallback to indexed cues in memory if track.activeCues has browser delay
+        if (!bestJaCue && loadedJapaneseCues.length > 0) {
+          bestJaCue = loadedJapaneseCues.find(c => video.currentTime >= c.startTime && video.currentTime <= c.endTime) || null;
+        }
+        if (!bestEnCue && loadedEnglishCues.length > 0) {
+          bestEnCue = loadedEnglishCues.find(c => video.currentTime >= c.startTime && video.currentTime <= c.endTime) || null;
+        }
+
         const currentJaText = bestJaCue ? bestJaCue.text : '';
         const currentEnText = bestEnCue ? bestEnCue.text : '';
 
@@ -1135,17 +1242,32 @@
       }
 
       if (!video.paused) {
+        if (subAnimId) cancelAnimationFrame(subAnimId);
         subAnimId = requestAnimationFrame(syncVideoFrame);
       }
     }
 
     video.addEventListener('play', () => {
       if (subAnimId) cancelAnimationFrame(subAnimId);
+      resumeSimulatedKaraoke();
       subAnimId = requestAnimationFrame(syncVideoFrame);
     });
 
     video.addEventListener('pause', () => {
-      if (subAnimId) cancelAnimationFrame(subAnimId);
+      if (subAnimId) {
+        cancelAnimationFrame(subAnimId);
+        subAnimId = null;
+      }
+      pauseSimulatedKaraoke();
+      syncVideoFrame();
+    });
+
+    video.addEventListener('ended', () => {
+      if (subAnimId) {
+        cancelAnimationFrame(subAnimId);
+        subAnimId = null;
+      }
+      stopSimulatedKaraoke();
       syncVideoFrame();
     });
 
@@ -1169,7 +1291,9 @@
         }
         preFetchLookahead(video.currentTime, 35);
       }
-      syncVideoFrame();
+      if (video.paused) {
+        syncVideoFrame();
+      }
     });
   }
 
