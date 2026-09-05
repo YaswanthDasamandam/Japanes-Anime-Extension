@@ -13,9 +13,15 @@ if (!fs.existsSync(distDir)) {
   fs.mkdirSync(distDir, { recursive: true });
 }
 
-const outputFile = path.resolve(distDir, 'anime-romaji-dual-subtitles-v1.0.0.zip');
+// Read version dynamically from manifest.json
+const manifestPath = path.join(extensionDir, 'manifest.json');
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const version = manifest.version || '0.1.0';
 
-console.log('[Packager] Preparing extension bundle for distribution...');
+const outputFile = path.resolve(distDir, `anime-romaji-dual-subtitles-v${version}-test.zip`);
+const latestTestZip = path.resolve(distDir, 'anime-romaji-extension-test.zip');
+
+console.log(`[Packager] Preparing test extension bundle v${version}...`);
 
 // Files/directories from extension/ to include (excluding models/ or any dev cache)
 const includes = ['manifest.json', 'content', 'icons', 'lib', 'popup'];
@@ -31,10 +37,15 @@ try {
     execSync(`cd "${extensionDir}" && zip -r "${outputFile}" ${files}`, { stdio: 'inherit' });
   }
 
+  // Also keep a generic anime-romaji-extension-test.zip
+  fs.copyFileSync(outputFile, latestTestZip);
+
   const stats = fs.statSync(outputFile);
   const sizeKb = (stats.size / 1024).toFixed(1);
-  console.log(`[Packager] Success! Created: ${outputFile} (${sizeKb} KB)`);
-  console.log('[Packager] Ready to upload to Chrome Web Store or attach to GitHub Releases.');
+  console.log(`[Packager] Success! Created:`);
+  console.log(`  - ${outputFile} (${sizeKb} KB)`);
+  console.log(`  - ${latestTestZip} (${sizeKb} KB)`);
+  console.log('[Packager] Ready to attach to GitHub Pre-release or share with testers.');
 } catch (err) {
   console.error('[Packager] Error packaging extension:', err.message);
   process.exit(1);

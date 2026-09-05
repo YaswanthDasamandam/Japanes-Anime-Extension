@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Anime Rōmaji & Dual Subtitles (Local)",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Learn Japanese with word-highlighted Rōmaji, dual English subtitles, and instant hover dictionary on video players.",
   "permissions": [
     "activeTab",

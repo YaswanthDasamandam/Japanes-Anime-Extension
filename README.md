@@ -83,4 +83,4 @@ To package a clean zip for the Chrome Web Store or GitHub Releases:
 node scripts/package.js
 ```
 
-This generates `dist/anime-romaji-dual-subtitles-v1.0.0.zip` ready for upload.
+This generates test packages in `dist/` (`anime-romaji-dual-subtitles-v0.1.0-test.zip`) ready for sharing with testers.
