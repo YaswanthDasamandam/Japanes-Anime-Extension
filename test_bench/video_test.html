@@ -90,6 +90,34 @@
     </video>
   </div>
 
+  <div style="margin: 16px 0; display: flex; gap: 12px; align-items: center;">
+    <button id="toggleEnTrackBtn" style="padding: 10px 20px; background: #e11d48; color: white; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer;">
+      🚫 Disable English Track (Test In-Memory Japanese Pre-translation)
+    </button>
+    <span id="trackStatusMsg" style="color: #94a3b8; font-size: 0.88rem;">Both tracks active</span>
+  </div>
+
+  <script>
+    const enTrack = document.querySelector('track[srclang="en"]');
+    const toggleBtn = document.getElementById('toggleEnTrackBtn');
+    const statusMsg = document.getElementById('trackStatusMsg');
+    let enActive = true;
+    toggleBtn.addEventListener('click', () => {
+      enActive = !enActive;
+      if (enActive) {
+        enTrack.track.mode = 'hidden';
+        toggleBtn.textContent = '🚫 Disable English Track (Test In-Memory Japanese Pre-translation)';
+        toggleBtn.style.background = '#e11d48';
+        statusMsg.textContent = 'Both tracks active (JA + EN)';
+      } else {
+        enTrack.track.mode = 'disabled';
+        toggleBtn.textContent = '✅ Enable English Track (Dual Subtitles)';
+        toggleBtn.style.background = '#10b981';
+        statusMsg.textContent = 'Japanese track only (Extension pre-translates in memory)';
+      }
+    });
+  </script>
+
   <div class="instructions">
     <h3>🧪 How to verify the Dual Subtitles & 3-Tier Furigana here:</h3>
     <ol>

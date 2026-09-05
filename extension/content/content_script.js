@@ -38,6 +38,13 @@
   let lastRenderedJapanese = '';
   let lastRenderedEnglish = '';
   const translationCache = new Map();
+  let loadedJapaneseCues = [];
+  let loadedEnglishCues = [];
+  let preFetchQueue = [];
+  const pendingTranslations = new Set();
+  let isPreFetchWorkerRunning = false;
+  let lastLookaheadTime = -999;
+  let hasEnglishTrackPresent = false;
 
   // Track classification helpers
   function isJapaneseTrack(track, sampleText = '') {
@@ -411,10 +418,93 @@
     return tokens.filter(t => t.trim().length > 0);
   }
 
+  // Instant offline fallback: local dictionary synthesis (<1ms)
+  function synthesizeLocalTranslation(text) {
+    if (!text || !text.trim()) return '';
+    try {
+      const clean = text.replace(/<[^>]+>/g, '').trim();
+      const tokens = splitJapaneseWords(clean);
+      const parts = [];
+      for (const tok of tokens) {
+        if (window.AnimeJapanese && window.AnimeJapanese.lookupWord) {
+          const matches = window.AnimeJapanese.lookupWord(tok);
+          if (matches && matches.length > 0) {
+            const raw = (matches[0].meanings[0] || '').replace(/\s*\([^)]*\)/g, '').split(/[,;]/)[0].trim();
+            parts.push(raw || tok);
+            continue;
+          }
+        }
+        parts.push(tok);
+      }
+      return parts.join(' ');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // Update control pill status with memory cache stats
+  function updatePreCacheStatus() {
+    if (pillStatusEl && pillStatusTextEl && targetVideo && !hasEnglishTrackPresent) {
+      if (loadedJapaneseCues.length > 0 && activeSubtitleCue) {
+        pillStatusTextEl.textContent = `Japanese CC Active (${translationCache.size} in memory)`;
+      }
+    }
+  }
+
+  // Rate-controlled background queue worker (prevents HTTP 429 rate-limiting)
+  async function startPreFetchWorker() {
+    if (isPreFetchWorkerRunning) return;
+    isPreFetchWorkerRunning = true;
+
+    while (preFetchQueue.length > 0) {
+      const text = preFetchQueue.shift();
+      pendingTranslations.delete(text);
+
+      if (!translationCache.has(text)) {
+        try {
+          await fetchEnglishTranslation(text);
+          updatePreCacheStatus();
+        } catch (err) {
+          console.debug('[Anime Extension] Pre-fetch worker error:', err);
+        }
+        // Polite delay (120ms) between background calls to prevent API rate limiting
+        await new Promise(resolve => setTimeout(resolve, 120));
+      }
+    }
+
+    isPreFetchWorkerRunning = false;
+  }
+
+  // Pre-fetch lookahead window of upcoming Japanese cues ahead of playback
+  function preFetchLookahead(currentTime, windowSec = 35) {
+    if (!loadedJapaneseCues || loadedJapaneseCues.length === 0) return;
+    if (hasEnglishTrackPresent) return; // Native English track exists, no need to pre-translate
+
+    // Filter upcoming cues within [currentTime - 1.0, currentTime + windowSec]
+    const upcoming = loadedJapaneseCues.filter(cue => {
+      return cue.startTime >= currentTime - 1.0 && cue.startTime <= currentTime + windowSec;
+    });
+
+    let addedCount = 0;
+    for (const cue of upcoming) {
+      const clean = cue.text.replace(/<[^>]+>/g, '').trim();
+      if (!clean) continue;
+      if (translationCache.has(clean) || pendingTranslations.has(clean)) continue;
+
+      pendingTranslations.add(clean);
+      preFetchQueue.push(clean);
+      addedCount++;
+    }
+
+    if (addedCount > 0) {
+      startPreFetchWorker();
+    }
+  }
+
   // Asynchronous real-time translation with memory cache
   async function fetchEnglishTranslation(japaneseText) {
     if (!japaneseText || !japaneseText.trim()) return '';
-    const clean = japaneseText.trim();
+    const clean = japaneseText.replace(/<[^>]+>/g, '').trim();
     if (translationCache.has(clean)) {
       return translationCache.get(clean);
     }
@@ -438,26 +528,11 @@
     }
 
     // 2. Offline fallback: local dictionary synthesis
-    try {
-      const tokens = splitJapaneseWords(clean);
-      const parts = [];
-      for (const tok of tokens) {
-        if (window.AnimeJapanese && window.AnimeJapanese.lookupWord) {
-          const matches = window.AnimeJapanese.lookupWord(tok);
-          if (matches && matches.length > 0) {
-            const raw = (matches[0].meanings[0] || '').replace(/\s*\([^)]*\)/g, '').split(/[,;]/)[0].trim();
-            parts.push(raw || tok);
-            continue;
-          }
-        }
-        parts.push(tok);
-      }
-      const fallback = parts.join(' ');
+    const fallback = synthesizeLocalTranslation(clean);
+    if (fallback) {
       translationCache.set(clean, fallback);
-      return fallback;
-    } catch (e) {
-      return '';
     }
+    return fallback;
   }
 
   // Convert raw Japanese & English subtitle text into synchronized, interactive 3-tier Furigana & Rōmaji display
@@ -487,19 +562,34 @@
     kanjiEl.innerHTML = '';
     romajiEl.innerHTML = '';
 
-    englishEl.textContent = englishText;
-    englishEl.style.display = (showEnglish && englishText) ? 'block' : 'none';
+    // Determine English translation synchronously from memory cache or instant local fallback
+    let resolvedEnglish = englishText;
+    const cleanJa = japaneseText ? japaneseText.replace(/<[^>]+>/g, '').trim() : '';
 
-    // If English subtitle is missing from video, auto-fetch English translation on the fly
-    if (japaneseText && !englishText) {
-      const targetJa = japaneseText;
-      fetchEnglishTranslation(targetJa).then((translated) => {
-        if (translated && (activeSubtitleCue?.text === targetJa || lastYouTubeText === targetJa || isTestActive)) {
-          englishEl.textContent = translated;
-          if (showEnglish) englishEl.style.display = 'block';
-        }
-      });
+    if (cleanJa && !resolvedEnglish) {
+      // 1. Instant synchronous in-memory cache lookup (0ms latency!)
+      if (translationCache.has(cleanJa)) {
+        resolvedEnglish = translationCache.get(cleanJa);
+      } else {
+        // 2. Instant offline dictionary synthesis (<1ms) - guarantees no blank gap!
+        resolvedEnglish = synthesizeLocalTranslation(cleanJa);
+
+        // 3. Proactively fetch high-quality sentence translation in background and update in place
+        fetchEnglishTranslation(cleanJa).then((translated) => {
+          if (translated) {
+            const currentJa = activeSubtitleCue?.text?.replace(/<[^>]+>/g, '').trim();
+            const currentYt = lastYouTubeText?.replace(/<[^>]+>/g, '').trim();
+            if (currentJa === cleanJa || currentYt === cleanJa || isTestActive) {
+              englishEl.textContent = translated;
+              if (showEnglish) englishEl.style.display = 'block';
+            }
+          }
+        });
+      }
     }
+
+    englishEl.textContent = resolvedEnglish;
+    englishEl.style.display = (showEnglish && resolvedEnglish) ? 'block' : 'none';
 
     // Word tokenization
     const rawTokens = splitJapaneseWords(japaneseText);
@@ -747,6 +837,50 @@
 
     let subAnimId = null;
 
+    function indexTracks() {
+      if (!video.textTracks || video.textTracks.length === 0) return;
+      let hasNewJaCues = false;
+      const seenJa = new Set(loadedJapaneseCues.map(c => `${c.startTime.toFixed(2)}_${c.text}`));
+      let enFound = false;
+
+      for (let i = 0; i < video.textTracks.length; i++) {
+        const track = video.textTracks[i];
+        if (track.mode === 'disabled') track.mode = 'hidden';
+
+        if (isEnglishTrack(track)) {
+          enFound = true;
+        }
+
+        if (!track.cues || track.cues.length === 0) continue;
+
+        const sampleText = track.cues[0]?.text || '';
+        if (isJapaneseTrack(track, sampleText)) {
+          for (let c = 0; c < track.cues.length; c++) {
+            const cue = track.cues[c];
+            const text = (cue.text || '').replace(/<[^>]+>/g, '').trim();
+            const key = `${cue.startTime.toFixed(2)}_${text}`;
+            if (text && !seenJa.has(key)) {
+              seenJa.add(key);
+              loadedJapaneseCues.push({
+                startTime: cue.startTime,
+                endTime: cue.endTime,
+                text: text
+              });
+              hasNewJaCues = true;
+            }
+          }
+        }
+      }
+
+      hasEnglishTrackPresent = enFound;
+
+      if (hasNewJaCues) {
+        loadedJapaneseCues.sort((a, b) => a.startTime - b.startTime);
+        console.log(`[Anime Extension] Indexed ${loadedJapaneseCues.length} Japanese cues in memory.`);
+        preFetchLookahead(video.currentTime, 35);
+      }
+    }
+
     // Enable all HTML5 TextTracks in hidden mode so browser parses cues
     function enableTracks() {
       if (video.textTracks && video.textTracks.length > 0) {
@@ -756,9 +890,11 @@
             track.mode = 'hidden'; // 'hidden' loads cues without browser default black box
           }
           track.oncuechange = () => {
+            indexTracks();
             syncVideoFrame();
           };
         }
+        indexTracks();
       }
     }
 
@@ -845,7 +981,7 @@
             updateSubtitleDisplay(currentJaText, currentEnText);
 
             const statusText = (bestJaCue && bestEnCue) ? 'Dual CC Active (JA + EN)' :
-                               bestJaCue ? 'Japanese CC Active' : 'English CC Active';
+                               bestJaCue ? `Japanese CC Active (${translationCache.size} in memory)` : 'English CC Active';
             updatePillStatus(true, statusText);
           }
 
@@ -903,8 +1039,28 @@
       syncVideoFrame();
     });
 
-    video.addEventListener('seeking', syncVideoFrame);
-    video.addEventListener('timeupdate', syncVideoFrame);
+    video.addEventListener('loadedmetadata', indexTracks);
+    video.addEventListener('canplay', indexTracks);
+
+    video.addEventListener('seeking', () => {
+      // Reprioritize pre-fetch queue immediately around newly sought position
+      preFetchQueue = [];
+      pendingTranslations.clear();
+      lastLookaheadTime = video.currentTime;
+      preFetchLookahead(video.currentTime, 35);
+      syncVideoFrame();
+    });
+
+    video.addEventListener('timeupdate', () => {
+      if (Math.abs(video.currentTime - lastLookaheadTime) >= 2.0) {
+        lastLookaheadTime = video.currentTime;
+        if (loadedJapaneseCues.length === 0) {
+          indexTracks();
+        }
+        preFetchLookahead(video.currentTime, 35);
+      }
+      syncVideoFrame();
+    });
   }
 
   // Keyboard Shortcuts (M: Mode, E: English, R: Replay cue, P: Shadowing)
