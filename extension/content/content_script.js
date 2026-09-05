@@ -35,6 +35,30 @@
   let ytObserver = null;
   let userHasMovedOverlay = false;
   let userHasMovedPill = false;
+  let lastRenderedJapanese = '';
+  let lastRenderedEnglish = '';
+  const translationCache = new Map();
+
+  // Track classification helpers
+  function isJapaneseTrack(track, sampleText = '') {
+    if (!track) return false;
+    const lang = ((track.language || track.srclang || '') + '').toLowerCase();
+    const label = ((track.label || '') + '').toLowerCase();
+    if (/^(ja|jp|ja-jp|japanese)/.test(lang)) return true;
+    if (/japanese|日本語|ja\b/.test(label)) return true;
+    if (sampleText && /[\u3040-\u309f\u30a0-\u30fa\u4e00-\u9faf]/.test(sampleText)) return true;
+    return false;
+  }
+
+  function isEnglishTrack(track, sampleText = '') {
+    if (!track) return false;
+    const lang = ((track.language || track.srclang || '') + '').toLowerCase();
+    const label = ((track.label || '') + '').toLowerCase();
+    if (/^(en|en-us|en-gb|english)/.test(lang)) return true;
+    if (/english|en\b|eng\b/.test(label)) return true;
+    if (sampleText && !/[\u3040-\u309f\u30a0-\u30fa\u4e00-\u9faf]/.test(sampleText) && /[a-zA-Z]{2,}/.test(sampleText)) return true;
+    return false;
+  }
 
   // Pre-sort dictionary keys by length descending for greedy segmentation
   let sortedDictKeys = [];
@@ -387,12 +411,61 @@
     return tokens.filter(t => t.trim().length > 0);
   }
 
-  // Convert raw Japanese subtitle text into clickable, highlighted Rōmaji words
+  // Asynchronous real-time translation with memory cache
+  async function fetchEnglishTranslation(japaneseText) {
+    if (!japaneseText || !japaneseText.trim()) return '';
+    const clean = japaneseText.trim();
+    if (translationCache.has(clean)) {
+      return translationCache.get(clean);
+    }
+
+    // 1. Try public web translation API
+    try {
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ja&tl=en&dt=t&q=${encodeURIComponent(clean)}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data[0]) {
+          const translated = data[0].map(item => item[0]).filter(Boolean).join('');
+          if (translated) {
+            translationCache.set(clean, translated);
+            return translated;
+          }
+        }
+      }
+    } catch (err) {
+      console.debug('[Anime Extension] Web translation unavailable, using dictionary fallback:', err);
+    }
+
+    // 2. Offline fallback: local dictionary synthesis
+    try {
+      const tokens = splitJapaneseWords(clean);
+      const parts = [];
+      for (const tok of tokens) {
+        if (window.AnimeJapanese && window.AnimeJapanese.lookupWord) {
+          const matches = window.AnimeJapanese.lookupWord(tok);
+          if (matches && matches.length > 0) {
+            const raw = (matches[0].meanings[0] || '').replace(/\s*\([^)]*\)/g, '').split(/[,;]/)[0].trim();
+            parts.push(raw || tok);
+            continue;
+          }
+        }
+        parts.push(tok);
+      }
+      const fallback = parts.join(' ');
+      translationCache.set(clean, fallback);
+      return fallback;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // Convert raw Japanese & English subtitle text into synchronized, interactive 3-tier Furigana & Rōmaji display
   function updateSubtitleDisplay(japaneseText, englishText = '') {
     if (!overlayEl) createOverlay();
     if (!controlPillEl) createControlPill();
 
-    if (!japaneseText || !japaneseText.trim()) {
+    if ((!japaneseText || !japaneseText.trim()) && (!englishText || !englishText.trim())) {
       if (!isTestActive) overlayEl.style.display = 'none';
       return;
     }
@@ -401,12 +474,32 @@
     overlayEl.className = `anime-sub-container mode-${displayMode}`;
     positionElements(targetVideo);
 
+    // If only English is present (no Japanese tracks available)
+    if (!japaneseText && englishText) {
+      kanjiEl.style.display = 'none';
+      romajiEl.style.display = 'none';
+      englishEl.textContent = englishText;
+      englishEl.style.display = showEnglish ? 'block' : 'none';
+      return;
+    }
+
     kanjiEl.style.display = 'flex';
     kanjiEl.innerHTML = '';
     romajiEl.innerHTML = '';
 
     englishEl.textContent = englishText;
     englishEl.style.display = (showEnglish && englishText) ? 'block' : 'none';
+
+    // If English subtitle is missing from video, auto-fetch English translation on the fly
+    if (japaneseText && !englishText) {
+      const targetJa = japaneseText;
+      fetchEnglishTranslation(targetJa).then((translated) => {
+        if (translated && (activeSubtitleCue?.text === targetJa || lastYouTubeText === targetJa || isTestActive)) {
+          englishEl.textContent = translated;
+          if (showEnglish) englishEl.style.display = 'block';
+        }
+      });
+    }
 
     // Word tokenization
     const rawTokens = splitJapaneseWords(japaneseText);
@@ -426,18 +519,45 @@
       rSpan.dataset.tokenIdx = idx;
 
       let rom = '';
-      if (token === 'は') rom = 'wa';
-      else if (token === 'へ') rom = 'e';
-      else if (token === 'を') rom = 'o';
-      else if (window.wanakana) {
-        rom = window.wanakana.toRomaji(token);
-      } else {
-        rom = token;
+      let shortMeaning = '';
+
+      // 3. Dictionary Lookup for True Phonetic Romaji & Concise Meaning Gloss
+      if (window.AnimeJapanese && window.AnimeJapanese.lookupWord) {
+        const matches = window.AnimeJapanese.lookupWord(token);
+        if (matches && matches.length > 0) {
+          const entry = matches[0];
+          if (entry.romaji) rom = entry.romaji;
+          else if (entry.kana && window.wanakana) rom = window.wanakana.toRomaji(entry.kana);
+
+          const raw = entry.meanings[0] || '';
+          shortMeaning = raw.replace(/\s*\([^)]*\)/g, '').split(/[,;]/)[0].trim();
+        }
+      }
+
+      // Phonetic particle overrides and wanakana fallback
+      if (!rom) {
+        if (token === 'は') rom = 'wa';
+        else if (token === 'へ') rom = 'e';
+        else if (token === 'を') rom = 'o';
+        else if (window.wanakana) {
+          rom = window.wanakana.toRomaji(token);
+        } else {
+          rom = token;
+        }
       }
 
       rSpan.textContent = rom;
       rSpan.dataset.surface = token;
       rSpan.dataset.romaji = rom;
+
+      if (!shortMeaning && isParticle) {
+        const particleMeanings = {
+          'は': 'topic', 'が': 'subj', 'を': 'obj', 'に': 'to/at', 'で': 'by/at',
+          'の': "'s/of", 'も': 'also', 'か': '?', 'ね': 'right?', 'よ': '!',
+          'から': 'from', 'まで': 'until', 'と': 'with/and'
+        };
+        shortMeaning = particleMeanings[token] || '';
+      }
 
       // Mutual hover & dictionary popover
       const onEnter = (e) => {
@@ -461,11 +581,25 @@
         const ruby = document.createElement('ruby');
         ruby.className = 'anime-ruby-unit';
         ruby.dataset.tokenIdx = idx;
-        ruby.appendChild(kSpan);
+
+        // Tier 1: English Pronunciation (Romaji)
         const rt = document.createElement('rt');
         rt.className = 'anime-ruby-rt';
         rt.textContent = rom;
         ruby.appendChild(rt);
+
+        // Tier 2: Japanese Character (Kanji/Kana)
+        ruby.appendChild(kSpan);
+
+        // Tier 3: Concise English Word Meaning Gloss
+        if (shortMeaning) {
+          const gloss = document.createElement('span');
+          gloss.className = 'anime-ruby-gloss';
+          gloss.textContent = shortMeaning;
+          gloss.title = shortMeaning;
+          ruby.appendChild(gloss);
+        }
+
         kanjiEl.appendChild(ruby);
       } else {
         kanjiEl.appendChild(kSpan);
@@ -480,7 +614,8 @@
     if (simulatedKaraokeInterval) clearInterval(simulatedKaraokeInterval);
     const kTokens = kanjiEl ? kanjiEl.querySelectorAll('.anime-kanji-token') : [];
     const rTokens = romajiEl ? romajiEl.querySelectorAll('.anime-word-token') : [];
-    const total = Math.max(kTokens.length, rTokens.length);
+    const rubyUnits = kanjiEl ? kanjiEl.querySelectorAll('.anime-ruby-unit') : [];
+    const total = Math.max(kTokens.length, rTokens.length, rubyUnits.length);
     if (total === 0) return;
 
     let currentIdx = 0;
@@ -488,13 +623,10 @@
 
     simulatedKaraokeInterval = setInterval(() => {
       for (let i = 0; i < total; i++) {
-        if (i === currentIdx) {
-          if (rTokens[i]) rTokens[i].classList.add('active');
-          if (kTokens[i]) kTokens[i].classList.add('active');
-        } else {
-          if (rTokens[i]) rTokens[i].classList.remove('active');
-          if (kTokens[i]) kTokens[i].classList.remove('active');
-        }
+        const isActive = (i === currentIdx);
+        if (rTokens[i]) rTokens[i].classList.toggle('active', isActive);
+        if (kTokens[i]) kTokens[i].classList.toggle('active', isActive);
+        if (rubyUnits[i]) rubyUnits[i].classList.toggle('active', isActive);
       }
       currentIdx++;
       if (currentIdx >= total) {
@@ -581,12 +713,13 @@
           // Check if Japanese characters are present
           const hasJapanese = /[\u3040-\u309f\u30a0-\u30fa\u4e00-\u9faf]/.test(fullText);
           if (hasJapanese) {
-            updateSubtitleDisplay(fullText);
+            updateSubtitleDisplay(fullText, '');
             startSimulatedKaraoke(Math.max(2000, fullText.length * 280));
-            updatePillStatus(true, 'Japanese CC Active');
+            updatePillStatus(true, 'Japanese CC Active (+ English)');
           } else {
-            // Text is present but not Japanese (e.g. English captions)
-            updatePillStatus(false, 'CC is English: Switch to Japanese in ⚙️');
+            // Text is English captions
+            updateSubtitleDisplay('', fullText);
+            updatePillStatus(true, 'English CC Active');
           }
         }
       } else {
@@ -594,6 +727,7 @@
           lastYouTubeText = '';
           if (!isTestActive && !activeSubtitleCue) {
             if (overlayEl) overlayEl.style.display = 'none';
+            updatePillStatus(false, 'Waiting for CC');
           }
         }
       }
@@ -607,13 +741,13 @@
     console.log('[Anime Extension] YouTube caption MutationObserver attached.');
   }
 
-  // Monitor standard HTML5 video player subtitles (Native CC detection with 60FPS sync)
+  // Monitor standard HTML5 video player subtitles (Native CC detection with 60FPS dual-track sync)
   function attachSubtitleListener(video) {
     if (!video) return;
 
     let subAnimId = null;
 
-    // Enable all HTML5 TextTracks so browser parses cues
+    // Enable all HTML5 TextTracks in hidden mode so browser parses cues
     function enableTracks() {
       if (video.textTracks && video.textTracks.length > 0) {
         for (let i = 0; i < video.textTracks.length; i++) {
@@ -622,15 +756,7 @@
             track.mode = 'hidden'; // 'hidden' loads cues without browser default black box
           }
           track.oncuechange = () => {
-            if (track.activeCues && track.activeCues.length > 0) {
-              const cue = track.activeCues[0];
-              activeSubtitleCue = cue;
-              updateSubtitleDisplay(cue.text);
-              updatePillStatus(true, 'HTML5 CC Active');
-            } else if (!isTestActive && !lastYouTubeText) {
-              activeSubtitleCue = null;
-              if (overlayEl) overlayEl.style.display = 'none';
-            }
+            syncVideoFrame();
           };
         }
       }
@@ -642,48 +768,122 @@
     }
 
     function syncVideoFrame() {
-      // 1. Check native TextTracks (WebVTT, HTML5 <track>)
       let foundCue = false;
+
+      // 1. Inspect native TextTracks for both Japanese and English active cues
       if (video.textTracks && video.textTracks.length > 0) {
+        let bestJaCue = null;
+        let bestEnCue = null;
+
         for (let i = 0; i < video.textTracks.length; i++) {
           const track = video.textTracks[i];
           if (track.mode === 'disabled') track.mode = 'hidden';
-          if (track.activeCues && track.activeCues.length > 0) {
-            const cue = track.activeCues[0];
-            if (activeSubtitleCue !== cue) {
-              activeSubtitleCue = cue;
-              updateSubtitleDisplay(cue.text);
-              updatePillStatus(true, 'CC Active');
-            }
-            foundCue = true;
 
-            // Shadowing auto-pause
-            if (shadowingMode && video.currentTime >= cue.endTime - 0.08 && lastPausedCue !== cue) {
-              lastPausedCue = cue;
-              video.pause();
+          const cues = track.activeCues;
+          const cue = (cues && cues.length > 0) ? cues[0] : null;
+          const cueText = cue ? cue.text : '';
+
+          if (isJapaneseTrack(track, cueText)) {
+            if (!bestJaCue && cue) bestJaCue = cue;
+          } else if (isEnglishTrack(track, cueText)) {
+            if (!bestEnCue && cue) bestEnCue = cue;
+          } else if (cue) {
+            if (/[\u3040-\u309f\u30a0-\u30fa\u4e00-\u9faf]/.test(cueText)) {
+              if (!bestJaCue) bestJaCue = cue;
+            } else if (!bestEnCue) {
+              bestEnCue = cue;
             }
-            break;
+          }
+        }
+
+        // If Japanese cue exists, search English tracks for overlapping/closest cue (±0.6s)
+        if (bestJaCue && !bestEnCue) {
+          for (let i = 0; i < video.textTracks.length; i++) {
+            const track = video.textTracks[i];
+            if (isEnglishTrack(track) && track.cues) {
+              for (let c = 0; c < track.cues.length; c++) {
+                const cand = track.cues[c];
+                if (cand.startTime <= video.currentTime + 0.5 && cand.endTime >= video.currentTime - 0.5) {
+                  bestEnCue = cand;
+                  break;
+                }
+              }
+              if (bestEnCue) break;
+            }
+          }
+        }
+
+        // If English cue exists, search Japanese tracks for overlapping/closest cue (±0.6s)
+        if (bestEnCue && !bestJaCue) {
+          for (let i = 0; i < video.textTracks.length; i++) {
+            const track = video.textTracks[i];
+            if (isJapaneseTrack(track) && track.cues) {
+              for (let c = 0; c < track.cues.length; c++) {
+                const cand = track.cues[c];
+                if (cand.startTime <= video.currentTime + 0.5 && cand.endTime >= video.currentTime - 0.5) {
+                  bestJaCue = cand;
+                  break;
+                }
+              }
+              if (bestJaCue) break;
+            }
+          }
+        }
+
+        const currentJaText = bestJaCue ? bestJaCue.text : '';
+        const currentEnText = bestEnCue ? bestEnCue.text : '';
+
+        if (currentJaText || currentEnText) {
+          foundCue = true;
+          const jaChanged = currentJaText !== lastRenderedJapanese;
+          const enChanged = currentEnText !== lastRenderedEnglish;
+
+          if (jaChanged || enChanged) {
+            lastRenderedJapanese = currentJaText;
+            lastRenderedEnglish = currentEnText;
+            activeSubtitleCue = bestJaCue || bestEnCue;
+            updateSubtitleDisplay(currentJaText, currentEnText);
+
+            const statusText = (bestJaCue && bestEnCue) ? 'Dual CC Active (JA + EN)' :
+                               bestJaCue ? 'Japanese CC Active' : 'English CC Active';
+            updatePillStatus(true, statusText);
+          }
+
+          // Shadowing auto-pause
+          if (shadowingMode && bestJaCue && video.currentTime >= bestJaCue.endTime - 0.08 && lastPausedCue !== bestJaCue) {
+            lastPausedCue = bestJaCue;
+            video.pause();
           }
         }
       }
 
-      // 2. High-precision word-level karaoke progress: Both Japanese & Romaji light up together!
+      if (!foundCue && !isTestActive && !lastYouTubeText) {
+        if (activeSubtitleCue || lastRenderedJapanese || lastRenderedEnglish) {
+          activeSubtitleCue = null;
+          lastRenderedJapanese = '';
+          lastRenderedEnglish = '';
+          if (overlayEl) overlayEl.style.display = 'none';
+          updatePillStatus(false, 'Waiting for CC');
+        }
+      }
+
+      // 2. High-precision word-level karaoke progress: Both Japanese, Romaji, and Furigana units light up together!
       const kTokens = kanjiEl ? kanjiEl.querySelectorAll('.anime-kanji-token') : [];
       const rTokens = romajiEl ? romajiEl.querySelectorAll('.anime-word-token') : [];
-      if (rTokens.length > 0 && activeSubtitleCue) {
+      const rubyUnits = kanjiEl ? kanjiEl.querySelectorAll('.anime-ruby-unit') : [];
+      const tokenCount = Math.max(kTokens.length, rTokens.length, rubyUnits.length);
+
+      if (tokenCount > 0 && activeSubtitleCue) {
         const duration = activeSubtitleCue.endTime - activeSubtitleCue.startTime;
         if (duration > 0) {
           const progress = Math.max(0, Math.min(1, (video.currentTime - activeSubtitleCue.startTime) / duration));
-          const activeIdx = Math.floor(progress * rTokens.length);
+          const activeIdx = Math.floor(progress * tokenCount);
 
-          for (let idx = 0; idx < rTokens.length; idx++) {
-            if (idx === activeIdx) {
-              rTokens[idx].classList.add('active');
-              if (kTokens[idx]) kTokens[idx].classList.add('active');
-            } else {
-              rTokens[idx].classList.remove('active');
-              if (kTokens[idx]) kTokens[idx].classList.remove('active');
-            }
+          for (let idx = 0; idx < tokenCount; idx++) {
+            const isActive = (idx === activeIdx);
+            if (rTokens[idx]) rTokens[idx].classList.toggle('active', isActive);
+            if (kTokens[idx]) kTokens[idx].classList.toggle('active', isActive);
+            if (rubyUnits[idx]) rubyUnits[idx].classList.toggle('active', isActive);
           }
         }
       }

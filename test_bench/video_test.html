@@ -86,19 +86,28 @@
     <video id="testVideo" controls autoplay crossorigin="anonymous">
       <source src="sample_video.mp4" type="video/mp4">
       <track default kind="subtitles" srclang="ja" label="Japanese" src="sample_1.vtt">
+      <track kind="subtitles" srclang="en" label="English" src="sample_1_en.vtt">
     </video>
   </div>
 
   <div class="instructions">
-    <h3>🧪 How to verify the Extension here:</h3>
+    <h3>🧪 How to verify the Dual Subtitles & 3-Tier Furigana here:</h3>
     <ol>
-      <li>Load the unpacked extension in Chrome via <code>chrome://extensions</code> (Folder: <code>c:\Users\dysai\MyProjects\Japanes Anime Extension\extension</code>).</li>
-      <li>Refresh this page. You will see the extension automatically hook into the &lt;video&gt; player.</li>
-      <li>Play the video: Watch the floating subtitle box light up both Japanese and Rōmaji words in real-time!</li>
-      <li>Press <kbd>M</kbd> to cycle between <b>Dual Mode</b>, <b>Hover-Only Mode</b>, and <b>Furigana Mode</b>.</li>
-      <li>Press <kbd>E</kbd> to toggle the English translation line.</li>
-      <li>Hover over any word to view its English Pronunciation and definition popup.</li>
-      <li>Click and drag the subtitle box to reposition it anywhere on your screen.</li>
+      <li>Load or reload the unpacked extension in Chrome via <code>chrome://extensions</code> (Folder: <code>c:\Users\dysai\MyProjects\Japanes Anime Extension\extension</code>).</li>
+      <li>Refresh this page. You will see the extension automatically hook into the &lt;video&gt; player and detect <b>both Japanese and English subtitle tracks</b>.</li>
+      <li>Play the video: Both Japanese and English subtitles appear together in real time!</li>
+      <li>Press <kbd>M</kbd> to switch to <b>Furigana Mode</b>: Notice the 3 tiers:
+        <ul style="margin: 4px 0 6px 20px; color: #38bdf8;">
+          <li><b>Top</b>: English Pronunciation (Rōmaji)</li>
+          <li><b>Middle</b>: Japanese Kanji / Kana characters</li>
+          <li><b>Bottom of each word</b>: English meaning gloss</li>
+          <li><b>Bottom line</b>: Full English sentence translation</li>
+        </ul>
+      </li>
+      <li>Press <kbd>E</kbd> to toggle English subtitles on/off.</li>
+      <li>Press <kbd>[</kbd> and <kbd>]</kbd> to scale subtitle font size smaller or larger.</li>
+      <li>Hover over any word to view its interactive Dictionary Popover (English pronunciation badge, JLPT rating, and full definitions).</li>
+      <li>Click and drag the subtitle box or control pill to reposition anywhere on screen.</li>
     </ol>
   </div>
 </body>

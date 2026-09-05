@@ -1,115 +1,247 @@
-# Real Video/Audio Transcription & Romanization Test Suite
+# Anime Rōmaji & Dual Subtitles (Local) - System Architecture
 
-A direct, automated benchmark pipeline to download real Japanese video/audio clips, transcribe them locally, convert them to word-segmented Rōmaji, generate English translations, and measure accuracy and latency before packaging.
-
-## User Review Required
-
-> [!IMPORTANT]
-> **Real Audio Verification**: Instead of mock tests, we will download actual Japanese video/audio snippets (e.g., conversational dialogue, anime speech clips) and run the transcription pipeline directly on them using local compute.
-
-> [!NOTE]
-> **Direct Pipeline Test**: This tests the exact speech-to-text, word-level timestamping, Japanese-to-Rōmaji tokenization, and English translation on real audio files, printing a side-by-side comparison.
+A comprehensive, local-first Chrome Extension architecture designed to supercharge Japanese language acquisition while watching anime, YouTube, and HTML5 video content. The extension concurrently ingests Japanese and English subtitles, synchronizes them in real time, and renders an interactive **3-Tier Furigana display** (Japanese Kanji/Kana + English Pronunciation + English Meaning).
 
 ---
 
-## Automated Test Architecture
+## 1. System Overview & Data Flow
+
+```mermaid
+graph TD
+    subgraph "Video Player Environment"
+        VP[HTML5 <video> Player]
+        TT[HTML5 TextTracks: JA & EN]
+        YT[YouTube CC / TimedText API]
+        AUD[Web Audio / Offscreen Stream]
+    end
+
+    subgraph "Ingestion & Detection Layer"
+        MTC[Multi-Track Classifier]
+        TT --> MTC
+        YT --> MTC
+        STT[Whisper WebGPU STT Engine]
+        AUD -.-> STT
+    end
+
+    subgraph "Synchronization & Harmonization"
+        SYN[Dual-Cue Time Aligner]
+        MTC -->|Japanese Cue| SYN
+        MTC -->|English Cue| SYN
+        STT -.->|Transcribed Cue| SYN
+        TRN[Auto-Translation Fallback Engine]
+        SYN -->|If English Missing| TRN
+    end
+
+    subgraph "Linguistic & NLP Processing Pipeline"
+        TOK[Morphological Word Segmenter]
+        ROM[Hepburn Rōmaji Engine + Particle Phonetics]
+        DIC[Local Dictionary Gloss & JLPT Engine]
+        SYN --> TOK
+        TOK --> ROM
+        TOK --> DIC
+    end
+
+    subgraph "Presentation & UI Overlay Layer"
+        RUBY["3-Tier Furigana Display<br/>1. English Pronunciation (&lt;rt&gt;)<br/>2. Japanese Text (&lt;span&gt;)<br/>3. English Meaning (&lt;gloss&gt;)<br/>4. Full English Subtitle Line"]
+        DUAL["Dual Subtitle Display<br/>(Kanji + Romaji + English)"]
+        POP[Interactive Dictionary Popover]
+        PILL[Floating Control Pill & Resizer]
+        ROM --> RUBY
+        DIC --> RUBY
+        TRN --> RUBY
+        ROM --> DUAL
+        DIC --> POP
+    end
+
+    RUBY --> VP
+    DUAL --> VP
+    PILL --> VP
+```
+
+---
+
+## 2. Ingestion Layer: Multi-Track Subtitle Detection
+
+Videos on the web (anime streaming portals, YouTube, HTML5 video embeds) present subtitles in three distinct modalities. The architecture unifies all three into normalized cue streams:
+
+### A. HTML5 Video `TextTrack` Architecture
+- Every `<video>` element exposes a `textTracks` collection (`TextTrackList`).
+- **The Problem in Previous Implementations**: Iterating over `video.textTracks` and breaking on the first active cue causes the second language track (English) to be completely ignored.
+- **Architectural Solution**:
+  1. **Track Classification**: All tracks are inspected and categorized:
+     - **Japanese Track**: `track.language` matches `ja|jp|ja-jp` OR `track.label` matches `/japanese|日本語|ja/i` OR cue text contains Japanese scripts `[\u3040-\u309f\u30a0-\u30fa\u4e00-\u9faf]`.
+     - **English Track**: `track.language` matches `en|en-us|en-gb` OR `track.label` matches `/english|en|eng/i` OR cue text contains Latin script without Japanese characters.
+  2. **Non-Destructive Activation**: Set `track.mode = 'hidden'` for all relevant tracks so the browser engine fetches and parses cues without rendering browser-default black subtitle boxes.
+  3. **Dual Query**: At any given playback timestamp (`video.currentTime`), query the active cue from both the Japanese track AND the English track simultaneously.
+
+### B. YouTube Captions & TimedText Integration
+- YouTube uses custom DOM nodes (`.ytp-caption-segment`) inside `#movie_player`.
+- **Architectural Solution**:
+  1. Detect currently active caption segments via `MutationObserver`.
+  2. If the active segment is Japanese: use it directly as the Japanese text and fetch/pair with English subtitles.
+  3. Query YouTube's `captionTracks` from the player response to fetch both `lang=ja` and `lang=en` (or `&tlang=en` auto-translated English) timed text tracks in parallel.
+
+### C. Audio STT Fallback (Whisper WebGPU)
+- For raw video streams lacking any pre-existing subtitle tracks, an offscreen document captures audio streams and runs local WebGPU Whisper inference (`transformers.js` with `whisper-tiny`), feeding timestamped text directly to the NLP pipeline.
+
+---
+
+## 3. Synchronization & Alignment Layer
+
+Japanese and English subtitle cues do not always have identical start and end timestamps due to differing syllable counts and grammatical phrasing.
+
+### Time-Window Harmonization Algorithm
+```javascript
+function getSynchronizedCues(jaTracks, enTracks, currentTime) {
+  const jaCue = findActiveCue(jaTracks, currentTime);
+  let enCue = findActiveCue(enTracks, currentTime);
+
+  // If no exact English cue at currentTime, search within a tolerance window (±0.6s)
+  if (jaCue && !enCue) {
+    enCue = findClosestCue(enTracks, jaCue.startTime, jaCue.endTime, 0.6);
+  }
+
+  return { jaCue, enCue };
+}
+```
+
+### Real-Time Translation Fallback
+When a video only has Japanese subtitles (and no English track exists anywhere on the page or player):
+- The Japanese cue text is dispatched to an asynchronous translation worker (`fetchEnglishTranslation`).
+- An in-memory LRU cache (`Map<string, string>`) guarantees zero redundant network calls.
+- Fallback chain:
+  1. Memory Cache
+  2. Fast HTTP Translation API (`translate.googleapis.com/translate_a/single`)
+  3. Local Dictionary Token Translation (100% offline fallback)
+- As soon as the translation resolves, the subtitle overlay updates smoothly without flickering or pausing video playback.
+
+---
+
+## 4. NLP & Linguistic Processing Engine
+
+To enable effortless language acquisition, raw Japanese sentences are segmented, romanized, and glossed word-by-word.
+
+### Step 1: Morphological Word Segmentation
+Japanese lacks spaces between words. The segmenter uses a longest-match greedy algorithm backed by the sorted dictionary trie:
+- Compounds like `死んでいる` (is dead) and `これから` (from now on) are treated as single cohesive semantic tokens rather than fragmented syllables.
+- Particles like `は`, `が`, `を`, `に`, `で`, `の`, `も`, `と` are isolated as grammatical particles.
+
+### Step 2: Hepburn Romanization & Particle Phonetics
+- Standard Hiragana/Katakana to Hepburn Rōmaji conversion via Wanakana.
+- Grammatical particle phonetic overrides:
+  - Topic marker `は` -> pronounced **"wa"** (not "ha").
+  - Direction particle `へ` -> pronounced **"e"** (not "he").
+  - Object marker `を` -> pronounced **"o"** (not "wo").
+
+### Step 3: Word Glossing & JLPT Mapping
+- Each token is queried against the embedded dictionary (`dict_engine.js`).
+- Returns:
+  - `romaji`: English phonetic reading.
+  - `shortMeaning`: Concise 1-3 word English definition for in-line display.
+  - `jlpt`: Difficulty rating (`N5` through `N1`).
+  - `pos`: Grammatical part-of-speech (Noun, Verb, Adjective, Particle, Copula).
+
+---
+
+## 5. Presentation & UI Overlay Layer: 3-Tier Furigana
+
+The user interface supports three distinct reading modes, optimized for varying skill levels:
+
+### A. 3-Tier Furigana Mode (`mode-ruby`)
+Designed for simultaneous comprehension of Kanji, pronunciation, and meaning:
+```
+       [omae]           [wa]          [mou]        [shinde iru]
+       お前              は            もう          死んでいる
+       (you)          (topic)       (already)       (is dead)
+------------------------------------------------------------------
+                 "You are already dead."
+```
+
+#### DOM Hierarchy:
+```html
+<div class="anime-sub-container mode-ruby">
+  <div class="anime-sub-kanji">
+    <ruby class="anime-ruby-unit">
+      <rt class="anime-ruby-rt">omae</rt>               <!-- Tier 1: English Pronunciation -->
+      <span class="anime-kanji-token">お前</span>       <!-- Tier 2: Japanese Character -->
+      <span class="anime-ruby-gloss">you</span>         <!-- Tier 3: English Meaning Gloss -->
+    </ruby>
+    ...
+  </div>
+  <!-- Tier 4: Full English Sentence Subtitle -->
+  <div class="anime-sub-english">You are already dead.</div>
+</div>
+```
+
+### B. Dual Subtitle Mode (`mode-dual`)
+- **Line 1 (Japanese)**: Kanji & Kana tokens (`お前 は もう 死んでいる。`).
+- **Line 2 (Pronunciation)**: Rōmaji karaoke line (`omae wa mou shinde iru.`) with synced word lighting.
+- **Line 3 (English)**: Full English translation line (`"You are already dead."`).
+
+### C. Hover-Only Mode (`mode-hover`)
+- Minimalist Japanese-only subtitles.
+- Hovering over any word reveals the interactive popover with English pronunciation, definition, and JLPT rating.
+
+### D. Interactive Dictionary Popover
+- Triggered on mouse hover over any Japanese or Rōmaji word token.
+- Displays:
+  - Badge: English Pronunciation (Rōmaji) in high-contrast gold.
+  - Japanese Kanji + JLPT Badge (e.g. `N3`) + Part of Speech (`Pronoun`).
+  - English Meanings list.
+
+### E. Floating Control Pill & Video Controls
+- Pinned to the video player header.
+- Provides one-click toggles:
+  - Subtitle Mode switcher (`Dual` / `Hover` / `Furigana`) - Hotkey: <kbd>M</kbd>
+  - Subtitle Size adjuster (<kbd>[</kbd> / <kbd>]</kbd>) with 10% steps
+  - English line toggle (<kbd>E</kbd>)
+  - Replay cue (<kbd>R</kbd>)
+  - Shadowing auto-pause (<kbd>P</kbd>)
+  - Direct CC turn-on helper for YouTube
+
+---
+
+## 6. Directory Structure
 
 ```
 Japanes Anime Extension/
-├── tests/
-│   ├── download_samples.js       # Downloads/extracts real Japanese dialogue clips
-│   ├── run_transcription_test.js # Direct STT test runner on real audio files
-│   ├── audio/                    # Storage for downloaded sample video/audio clips
-│   │   ├── sample_1.wav          # Clean conversational Japanese
-│   │   ├── sample_2.wav          # Anime dialogue with background music
-│   │   └── sample_3.wav          # Fast-paced speech
-│   └── ground_truth.json         # Reference transcripts to calculate accuracy (WER)
-├── lib/
-│   ├── stt_engine.js             # Local Whisper STT runner (Japanese + English)
-│   ├── romaji_engine.js          # Tokenizer + Katakana to Hepburn Rōmaji
-│   └── aligner.js                # Word-level timestamp alignment
-└── package.json                  # Test runner dependencies
+├── Architecture.md                # System architecture documentation (this document)
+├── extension/                     # Chrome Extension Package (Manifest V3)
+│   ├── manifest.json              # Extension manifest, permissions, and script declarations
+│   ├── popup/
+│   │   ├── popup.html             # Popup settings panel
+│   │   ├── popup.css              # Popup dark UI theme
+│   │   └── popup.js               # Settings persistence (chrome.storage.local)
+│   ├── content/
+│   │   ├── content_script.js      # Video hook, dual-track sync, Furigana & karaoke engine
+│   │   └── overlay.css            # 3-tier Furigana, karaoke glow, and popover styling
+│   ├── lib/
+│   │   ├── wanakana.min.js        # Kana-to-Romaji conversion engine
+│   │   └── dict_engine.js         # Local dictionary (Kanji, Romaji, Meanings, JLPT)
+│   ├── models/                    # Bundled local ONNX Whisper models (for offline audio STT)
+│   └── icons/                     # Extension icons (16, 48, 128)
+├── test_bench/                    # Interactive Video Test Bench
+│   ├── video_test.html            # Video player with dual Japanese + English .vtt tracks
+│   ├── sample_video.mp4           # Video sample file
+│   ├── sample_1.vtt               # Reference Japanese subtitle file
+│   ├── sample_1_en.vtt            # Reference English subtitle file
+│   ├── index.html                 # Audio test bench
+│   ├── style.css                  # Test bench styling
+│   └── test_player.js             # Test runner logic
+└── tests/                         # Node automated test suite
+    ├── test_dictionary.js         # Dictionary & de-inflection unit tests
+    └── run_transcription_test.js  # Whisper STT accuracy & latency benchmarks
 ```
 
 ---
 
-## Execution & Benchmark Steps
+## 7. Verification & Quality Matrix
 
-### Step 1: Environment & Sample Audio Preparation
-- Set up Node/npm test environment with required libraries (`@huggingface/transformers`, `wanakana`, `wavefile`).
-- Obtain 3 diverse real Japanese speech samples:
-  1. Standard clean dialogue (e.g., greeting / daily conversation).
-  2. Anime/dramatic dialogue (expressive pitch, casual slang).
-  3. Continuous phrase with particles (`wa`, `o`, `ni`) to test pronunciation rules.
-
-### Step 2: Direct Transcription & Translation Test
-- Run Whisper locally on each audio file:
-  - Task 1: Generate Japanese transcription (`task: "transcribe"`, `language: "ja"`).
-  - Task 2: Generate English translation (`task: "translate"`).
-  - Task 3: Extract timestamped tokens/chunks.
-
-### Step 3: Rōmaji Tokenization & Word Alignment
-- Feed the transcription to the Rōmaji engine.
-- Verify:
-  - Text splits into discrete words (not a single unspaced block).
-  - Particle pronunciation is correct (e.g., `私 は` -> `watashi wa`).
-  - Word timestamps map accurately to the audio timeline.
-
-### Step 4: Quality & Speed Benchmark Report
-- Print a clear benchmark table showing:
-  - File name & duration
-  - Transcribed Japanese vs Reference
-  - Generated Rōmaji (word-by-word)
-  - English translation
-  - Processing time / speed factor (RTF)
-
-
----
-
-## Proposed File Structure
-
-### Extension Core (`Japanes Anime Extension/`)
-
-```
-Japanes Anime Extension/
-├── manifest.json                  # Chrome Extension Manifest V3 configuration
-├── popup/
-│   ├── popup.html                 # Extension control panel & settings
-│   ├── popup.css                  # Popup styling
-│   └── popup.js                   # Settings logic (engine toggle, display options)
-├── content/
-│   ├── content_script.js          # Injected into video pages; manages overlay & video sync
-│   ├── overlay.css                # Subtitle karaoke styling, hover dictionary popover
-│   └── cc_detector.js             # Detects and intercepts native video captions if present
-├── offscreen/
-│   ├── offscreen.html             # Headless offscreen document for Audio & WebGPU
-│   ├── offscreen.js               # Audio stream capture & coordination
-│   └── whisper_worker.js          # WebGPU Transformers.js Whisper inference
-├── lib/
-│   ├── transformers.min.js        # Bundled in-browser ML runtime (WebGPU / ONNX)
-│   ├── wanakana.min.js            # Kana & Romaji conversion library
-│   ├── tokenizer.js               # Japanese word segmentation & reading parser
-│   └── dict.js                    # Embedded mini-dictionary for hover glosses
-└── icons/                         # Extension icons (16, 48, 128)
-```
-
----
-
-## Verification Plan
-
-### 1. Model & Engine Verification
-- Verify that WebGPU initializes properly in the offscreen document.
-- Test in-browser transcription on sample Japanese audio clips.
-- Verify word-level timestamp alignment and segment boundaries.
-
-### 2. Romanization & Highlighting Verification
-- Feed complex Japanese phrases (kanji compounds, particles like は/へ/を) and verify correct Hepburn Rōmaji outputs.
-- Test karaoke highlighting alignment matching video playback `currentTime`.
-
-### 3. Video Integration Test
-- Load the unpacked extension in Chrome.
-- Test on YouTube / generic HTML5 video:
-  - Video overlay mounts cleanly over the video player.
-  - Subtitles sync with the dialogue.
-  - English line displays and toggles with hotkey `E`.
-  - Hovering over a word displays the dictionary popup.
+| Feature / Scenario | Expected Behavior | Verification Method |
+| :--- | :--- | :--- |
+| **Dual Track Video (JA + EN)** | Both Japanese & English subtitles load concurrently at current timestamp. | Test on `video_test.html` with dual tracks. |
+| **Japanese-Only Video** | Japanese loads; English line auto-translates via fallback engine. | Disable English track in video player. |
+| **Furigana Mode** | Renders Pronunciation (top) + Kanji (middle) + English Meaning (bottom) + Full English line. | Press <kbd>M</kbd> to switch to Furigana mode. |
+| **Word Hover Popover** | Instant popover with English pronunciation, JLPT tag, and definition. | Hover over `お前`, `死んでいる`, `天気`. |
+| **Font Resizing** | Subtitle container and text scale proportionally between 80% and 220%. | Press <kbd>[</kbd> and <kbd>]</kbd>. |
+| **Hotkeys** | <kbd>M</kbd> switches modes, <kbd>E</kbd> toggles English, <kbd>R</kbd> replays line. | Keypress checks during video playback. |
