@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Local Japanese audio transcription, Romaji conversion, and dual subtitles",
   "scripts": {
+    "test": "node tests/test_dictionary.js && node tests/test_dual_subtitles.js && node tests/test_lookahead_cache.js && node tests/test_pause_behavior.js",
     "test:download": "node tests/download_samples.js",
     "test:transcribe": "node tests/run_transcription_test.js",
     "package": "node scripts/package.js"

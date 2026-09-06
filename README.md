@@ -75,12 +75,17 @@ If something doesn't work as expected:
 
 ---
 
-## 📦 Developer Packaging
+## 📦 Developer & Make Commands
 
-To package a clean zip for the Chrome Web Store or GitHub Releases:
+A cross-platform `Makefile` is included to streamline packaging, testing, and releases:
 
-```bash
-node scripts/package.js
-```
+| Command | Description |
+| :--- | :--- |
+| `make package` | Bundles `extension/` into `dist/` zip archives for testers |
+| `make test` | Runs all unit and pipeline validation tests |
+| `make test-transcribe` | Runs local Whisper AI transcription benchmarks |
+| `make clean` | Removes `dist/` bundles and temporary test output |
+| `make tag-test` | Creates local git pre-release tag `v0.1.0-test` |
+| `make push-test` | Pushes commits and tag to GitHub |
 
-This generates test packages in `dist/` (`anime-romaji-dual-subtitles-v0.1.0-test.zip`) ready for sharing with testers.
+*(Alternatively, you can run `node scripts/package.js` directly).*
