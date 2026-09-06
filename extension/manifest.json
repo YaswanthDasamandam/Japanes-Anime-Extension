@@ -23,7 +23,9 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "<all_urls>"
+      ],
       "js": [
         "lib/wanakana.min.js",
         "lib/deinflector.js",
@@ -43,7 +45,9 @@
         "lib/*",
         "content/*"
       ],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

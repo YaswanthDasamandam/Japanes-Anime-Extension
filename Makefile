@@ -2,7 +2,11 @@
 # Anime Rōmaji & Dual Subtitles - Development & Distribution Makefile
 # ==============================================================================
 
-.PHONY: all help package test test-unit test-transcribe test-samples clean tag-test push-test
+.PHONY: all help version sync bump-patch bump-minor package test test-unit test-transcribe test-samples clean tag push
+
+# Single Source of Truth: query version dynamically via scripts/sync-version.js
+VERSION := $(shell node scripts/sync-version.js --get)
+TAG     := $(shell node scripts/sync-version.js --get-tag)
 
 # Default target: display help
 all: help
@@ -10,22 +14,35 @@ all: help
 help:
 	@echo =======================================================================
 	@echo   ANIME ROMAJI ^& DUAL SUBTITLES - MAKE COMMANDS
+	@echo   Current Version (SSoT): $(VERSION) [Tag: $(TAG)]
 	@echo =======================================================================
-	@echo   make package         Package extension into dist/ zip files for testers
+	@echo   make version         Display current project version
+	@echo   make sync            Sync extension/manifest.json with package.json
+	@echo   make bump-patch      Bump patch version (e.g. 0.1.0 -^> 0.1.1) and sync
+	@echo   make bump-minor      Bump minor version (e.g. 0.1.0 -^> 0.2.0) and sync
+	@echo   make package         Package extension into dist/ using current version
 	@echo   make test            Run all unit and pipeline validation tests
-	@echo   make test-unit       Run individual subtitle, dictionary, ^& pause tests
 	@echo   make test-transcribe Run Whisper STT audio transcription benchmark
-	@echo   make test-samples    Download test audio benchmark samples
 	@echo   make clean           Remove dist/ bundles and temporary test output
-	@echo   make tag-test        Create local git tag v0.1.0-test
-	@echo   make push-test       Push commits and tag to GitHub
+	@echo   make tag             Create git tag $(TAG) using current SSoT version
+	@echo   make push            Push main branch and tag $(TAG) to GitHub
 	@echo =======================================================================
 
-# Package extension bundle for testers / pre-release
+version:
+	@node scripts/sync-version.js
+
+sync:
+	@node scripts/sync-version.js
+
+bump-patch:
+	@node scripts/sync-version.js --patch
+
+bump-minor:
+	@node scripts/sync-version.js --minor
+
 package:
 	@node scripts/package.js
 
-# Run all core unit and pipeline tests
 test: test-unit
 
 test-unit:
@@ -41,25 +58,20 @@ test-unit:
 	@echo [4/4] Running Pause Behavior Test...
 	@node tests/test_pause_behavior.js
 
-# Download benchmark audio samples
 test-samples:
 	@node tests/download_samples.js
 
-# Run Whisper AI transcription benchmark
 test-transcribe:
 	@node tests/run_transcription_test.js
 
-# Clean build artifacts
 clean:
 	@node -e "import('fs').then(fs => { if (fs.existsSync('dist')) { fs.rmSync('dist', { recursive: true, force: true }); console.log('[Clean] dist/ removed.'); } else { console.log('[Clean] Nothing to clean.'); } })"
 
-# Git helper to tag the current commit as a testing pre-release
-tag-test:
-	@git tag -a v0.1.0-test -m "v0.1.0-test: Experimental Testing Preview"
-	@echo Tag v0.1.0-test created locally. Run 'make push-test' to publish to GitHub.
+tag:
+	@git tag -a $(TAG) -m "$(TAG): Release preview"
+	@echo Tag $(TAG) created locally. Run 'make push' to publish to GitHub.
 
-# Push main and the test tag to GitHub
-push-test:
+push:
 	@git push origin main
-	@git push origin v0.1.0-test
-	@echo Pushed main and v0.1.0-test tag to GitHub successfully.
+	@git push origin $(TAG)
+	@echo Pushed main and $(TAG) to GitHub successfully.

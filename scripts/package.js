@@ -13,15 +13,15 @@ if (!fs.existsSync(distDir)) {
   fs.mkdirSync(distDir, { recursive: true });
 }
 
-// Read version dynamically from manifest.json
-const manifestPath = path.join(extensionDir, 'manifest.json');
-const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-const version = manifest.version || '0.1.0';
+import { syncVersions } from './sync-version.js';
 
-const outputFile = path.resolve(distDir, `anime-romaji-dual-subtitles-v${version}-test.zip`);
-const latestTestZip = path.resolve(distDir, 'anime-romaji-extension-test.zip');
+// Synchronize manifest.json with package.json (Single Source of Truth)
+const { rawVersion, chromeVersion } = syncVersions();
 
-console.log(`[Packager] Preparing test extension bundle v${version}...`);
+const outputFile = path.resolve(distDir, `anime-romaji-dual-subtitles-v${rawVersion}.zip`);
+const latestZip = path.resolve(distDir, 'anime-romaji-extension-latest.zip');
+
+console.log(`[Packager] Preparing extension bundle v${rawVersion} (Chrome manifest: ${chromeVersion})...`);
 
 // Files/directories from extension/ to include (excluding models/ or any dev cache)
 const includes = ['manifest.json', 'content', 'icons', 'lib', 'popup'];
@@ -37,14 +37,14 @@ try {
     execSync(`cd "${extensionDir}" && zip -r "${outputFile}" ${files}`, { stdio: 'inherit' });
   }
 
-  // Also keep a generic anime-romaji-extension-test.zip
-  fs.copyFileSync(outputFile, latestTestZip);
+  // Also keep a generic anime-romaji-extension-latest.zip
+  fs.copyFileSync(outputFile, latestZip);
 
   const stats = fs.statSync(outputFile);
   const sizeKb = (stats.size / 1024).toFixed(1);
   console.log(`[Packager] Success! Created:`);
   console.log(`  - ${outputFile} (${sizeKb} KB)`);
-  console.log(`  - ${latestTestZip} (${sizeKb} KB)`);
+  console.log(`  - ${latestZip} (${sizeKb} KB)`);
   console.log('[Packager] Ready to attach to GitHub Pre-release or share with testers.');
 } catch (err) {
   console.error('[Packager] Error packaging extension:', err.message);

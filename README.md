@@ -77,15 +77,18 @@ If something doesn't work as expected:
 
 ## 📦 Developer & Make Commands
 
-A cross-platform `Makefile` is included to streamline packaging, testing, and releases:
+A cross-platform `Makefile` and version synchronization engine ensure `package.json` acts as the **Single Source of Truth (SSoT)** for versioning across `manifest.json`, zip packages, and Git tags:
 
 | Command | Description |
 | :--- | :--- |
-| `make package` | Bundles `extension/` into `dist/` zip archives for testers |
+| `make version` | Displays the current SSoT version and Chrome manifest version |
+| `make bump-patch` | Bumps patch version (e.g. `0.1.0` $\rightarrow$ `0.1.1`) and syncs `manifest.json` |
+| `make bump-minor` | Bumps minor version (e.g. `0.1.0` $\rightarrow$ `0.2.0`) and syncs `manifest.json` |
+| `make package` | Bundles `extension/` into `dist/` zip archives named with the current version |
 | `make test` | Runs all unit and pipeline validation tests |
 | `make test-transcribe` | Runs local Whisper AI transcription benchmarks |
 | `make clean` | Removes `dist/` bundles and temporary test output |
-| `make tag-test` | Creates local git pre-release tag `v0.1.0-test` |
-| `make push-test` | Pushes commits and tag to GitHub |
+| `make tag` | Creates a git release/pre-release tag using the current SSoT version |
+| `make push` | Pushes commits and tag to GitHub |
 
-*(Alternatively, you can run `node scripts/package.js` directly).*
+*(You can also set any custom version directly with `node scripts/sync-version.js <new-version>`).*
