@@ -49,6 +49,50 @@
   let isPreFetchWorkerRunning = false;
   let lastLookaheadTime = -999;
   let hasEnglishTrackPresent = false;
+  let currentVideoSrc = '';
+  let currentUrl = (typeof window !== 'undefined' && window.location) ? window.location.href : '';
+  let activeReindexFn = null;
+
+  // Complete reset of subtitle cues and visual overlay when switching episodes or videos
+  function resetSubtitleState(reason = 'unknown') {
+    console.log(`[Anime Extension] Resetting subtitle state (reason: ${reason})`);
+
+    // 1. Clear in-memory cue indexes so previous episode subtitles never bleed into next episode
+    loadedJapaneseCues = [];
+    loadedEnglishCues = [];
+
+    // 2. Reset active cue tracking & rendered text
+    activeSubtitleCue = null;
+    lastPausedCue = null;
+    lastRenderedJapanese = '';
+    lastRenderedEnglish = '';
+    lastYouTubeText = '';
+    lastLookaheadTime = -999;
+    hasEnglishTrackPresent = false;
+
+    // 3. Clear pre-fetch lookahead queue
+    preFetchQueue = [];
+    pendingTranslations.clear();
+
+    // 4. Cancel animations
+    if (subAnimId) {
+      cancelAnimationFrame(subAnimId);
+      subAnimId = null;
+    }
+    stopSimulatedKaraoke();
+
+    // 5. Hide and clean DOM elements
+    if (overlayEl) {
+      overlayEl.style.display = 'none';
+    }
+    if (kanjiEl) kanjiEl.innerHTML = '';
+    if (romajiEl) romajiEl.innerHTML = '';
+    if (englishEl) englishEl.textContent = '';
+    hideDictionary();
+
+    // 6. Reset control pill status
+    updatePillStatus(false, 'Waiting for CC');
+  }
 
   // Track classification helpers
   function isJapaneseTrack(track, sampleText = '') {
@@ -1033,11 +1077,13 @@
   // Monitor standard HTML5 video player subtitles (Native CC detection with 60FPS dual-track sync)
   function attachSubtitleListener(video) {
     if (!video) return;
+    activeReindexFn = enableTracks;
 
     function indexTracks() {
       if (!video.textTracks || video.textTracks.length === 0) return;
       let hasNewJaCues = false;
       const seenJa = new Set(loadedJapaneseCues.map(c => `${c.startTime.toFixed(2)}_${c.text}`));
+      const seenEn = new Set(loadedEnglishCues.map(c => `${c.startTime.toFixed(2)}_${c.text}`));
       let enFound = false;
 
       for (let i = 0; i < video.textTracks.length; i++) {
@@ -1070,7 +1116,9 @@
           for (let c = 0; c < track.cues.length; c++) {
             const cue = track.cues[c];
             const text = (cue.text || '').replace(/<[^>]+>/g, '').trim();
-            if (text) {
+            const key = `${cue.startTime.toFixed(2)}_${text}`;
+            if (text && !seenEn.has(key)) {
+              seenEn.add(key);
               loadedEnglishCues.push({
                 startTime: cue.startTime,
                 endTime: cue.endTime,
@@ -1087,6 +1135,9 @@
         loadedJapaneseCues.sort((a, b) => a.startTime - b.startTime);
         console.log(`[Anime Extension] Indexed ${loadedJapaneseCues.length} Japanese cues in memory.`);
         preFetchLookahead(video.currentTime, 35);
+      }
+      if (loadedEnglishCues.length > 0) {
+        loadedEnglishCues.sort((a, b) => a.startTime - b.startTime);
       }
     }
 
@@ -1110,6 +1161,10 @@
     enableTracks();
     if (video.textTracks) {
       video.textTracks.onaddtrack = () => enableTracks();
+      video.textTracks.onremovetrack = () => {
+        resetSubtitleState('track_removed');
+        enableTracks();
+      };
     }
 
     function syncVideoFrame() {
@@ -1273,6 +1328,15 @@
 
     video.addEventListener('loadedmetadata', indexTracks);
     video.addEventListener('canplay', indexTracks);
+    video.addEventListener('loadstart', () => {
+      console.log('[Anime Extension] Video loadstart detected.');
+      resetSubtitleState('video_loadstart');
+      enableTracks();
+    });
+    video.addEventListener('emptied', () => {
+      console.log('[Anime Extension] Video emptied detected.');
+      resetSubtitleState('video_emptied');
+    });
 
     video.addEventListener('seeking', () => {
       // Reprioritize pre-fetch queue immediately around newly sought position
@@ -1325,11 +1389,62 @@
     }
   });
 
+  // Detect navigation changes (SPA episode click, popstate, URL change, video src change)
+  function checkNavigationOrSrcChange() {
+    if (typeof window === 'undefined' || !window.location) return;
+
+    const newUrl = window.location.href;
+    if (newUrl !== currentUrl) {
+      console.log(`[Anime Extension] URL navigation detected: ${currentUrl} -> ${newUrl}`);
+      currentUrl = newUrl;
+      resetSubtitleState('url_change');
+      if (targetVideo) {
+        currentVideoSrc = targetVideo.currentSrc || targetVideo.src || '';
+        if (activeReindexFn) activeReindexFn();
+      }
+      return;
+    }
+
+    if (targetVideo) {
+      const newSrc = targetVideo.currentSrc || targetVideo.src || '';
+      if (currentVideoSrc && newSrc && newSrc !== currentVideoSrc) {
+        console.log(`[Anime Extension] Video src changed: ${currentVideoSrc} -> ${newSrc}`);
+        currentVideoSrc = newSrc;
+        resetSubtitleState('video_src_change');
+        if (activeReindexFn) activeReindexFn();
+      } else if (!currentVideoSrc && newSrc) {
+        currentVideoSrc = newSrc;
+      }
+    }
+  }
+
+  window.addEventListener('popstate', checkNavigationOrSrcChange);
+  window.addEventListener('hashchange', checkNavigationOrSrcChange);
+  window.addEventListener('yt-navigate-finish', () => {
+    checkNavigationOrSrcChange();
+    resetSubtitleState('yt_navigate_finish');
+    if (activeReindexFn) activeReindexFn();
+  });
+
   // Attach to video on page and monitor for SPA navigation
   function setupExtension() {
+    checkNavigationOrSrcChange();
+
+    // If targetVideo was removed from DOM, clean up
+    if (targetVideo && !targetVideo.isConnected) {
+      console.log('[Anime Extension] Video disconnected from DOM.');
+      targetVideo = null;
+      currentVideoSrc = '';
+      activeReindexFn = null;
+      resetSubtitleState('video_disconnected');
+    }
+
     const video = findVideo();
     if (video && video !== targetVideo) {
+      console.log('[Anime Extension] New video element detected:', video);
+      resetSubtitleState('new_video_element');
       targetVideo = video;
+      currentVideoSrc = video.currentSrc || video.src || '';
       createOverlay();
       createControlPill();
       positionElements(video);
@@ -1340,5 +1455,5 @@
   }
 
   setupExtension();
-  setInterval(setupExtension, 1200);
+  setInterval(setupExtension, 1000);
 })();

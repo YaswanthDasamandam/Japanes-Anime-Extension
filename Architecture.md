@@ -114,6 +114,17 @@ When a video only has Japanese subtitles (and no English track exists anywhere o
 - **Instant Offline Fallback**: If an un-cached cue is encountered (e.g. following a sudden seek), the local dictionary token synthesizer (`synthesizeLocalTranslation`) renders the meaning within `<1ms`, upgrading smoothly once the web translation resolves.
 - **Seek Reprioritization**: Scrubbing immediately clears distant queue items and refocuses the pre-fetch window on the new playback timestamp.
 
+### Episode Transition & In-Memory State Reset Lifecycle
+When watching anime series on streaming platforms (Crunchyroll, Netflix, YouTube, HiAnime):
+- **SPA Navigation & Source Detection**: Single-Page Applications do not reload the page or extension context when users click "Next Episode". The extension continuously tracks `window.location.href`, `video.src` / `video.currentSrc`, and HTML5 media events (`loadstart`, `emptied`, `track_removed`, `yt-navigate-finish`).
+- **Complete In-Memory Purge**:
+  - Empties `loadedJapaneseCues` and `loadedEnglishCues` arrays to prevent previous episode cues from bleeding into the new episode during early fallback lookups ($t=0\text{s}$ to $t=2\text{s}$).
+  - Resets `activeSubtitleCue`, `lastRenderedJapanese`, and `lastRenderedEnglish`, immediately hiding the overlay and preventing frozen subtitle artifacts on screen during loading/buffering screens.
+  - Clears `preFetchQueue` and `pendingTranslations` sets.
+- **Clean Ingestion & Deduplication**:
+  - Automatically re-attaches `TextTrack` listeners and indexes new episode cues once `loadedmetadata` or `canplay` fires.
+  - Cues in both Japanese and English streams are deduplicated by timestamp + text keys (`${startTime}_${text}`) to eliminate duplicate cues across repeated browser track-parsing events.
+
 ---
 
 ## 4. NLP & Linguistic Processing Engine
@@ -229,9 +240,12 @@ Japanes Anime Extension/
 │   └── test_player.js             # Test runner logic
 └── tests/                         # Node automated test suite
     ├── test_dictionary.js         # Dictionary & de-inflection unit tests
+    ├── test_dual_subtitles.js     # Dual track & 3-tier Furigana tests
+    ├── test_lookahead_cache.js    # Pre-loading & lookahead cache tests
+    ├── test_pause_behavior.js     # Pause, freeze & simulated karaoke tests
+    ├── test_episode_reset.js      # Episode transition & state reset tests
     └── run_transcription_test.js  # Whisper STT accuracy & latency benchmarks
 ```
-
 ---
 
 ## 7. Verification & Quality Matrix
@@ -240,6 +254,7 @@ Japanes Anime Extension/
 | :--- | :--- | :--- |
 | **Dual Track Video (JA + EN)** | Both Japanese & English subtitles load concurrently at current timestamp. | Test on `video_test.html` with dual tracks. |
 | **Japanese-Only Video** | Japanese loads; English line auto-translates via fallback engine. | Disable English track in video player. |
+| **Episode Transition Reset** | Memory cues cleared; old subtitles never bleed into next episode. | `npm test` (`test_episode_reset.js`). |
 | **Furigana Mode** | Renders Pronunciation (top) + Kanji (middle) + English Meaning (bottom) + Full English line. | Press <kbd>M</kbd> to switch to Furigana mode. |
 | **Word Hover Popover** | Instant popover with English pronunciation, JLPT tag, and definition. | Hover over `お前`, `死んでいる`, `天気`. |
 | **Font Resizing** | Subtitle container and text scale proportionally between 80% and 220%. | Press <kbd>[</kbd> and <kbd>]</kbd>. |
